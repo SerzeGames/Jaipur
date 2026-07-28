@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Jaipur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Yatra+One&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden;background:#07211f;
+    font-family:'Barlow Semi Condensed',system-ui,sans-serif;
+    -webkit-tap-highlight-color:transparent;touch-action:none}
+  body{display:flex;align-items:center;justify-content:center}
+  #cv{display:block;image-rendering:auto}
+  #rotate{position:fixed;inset:0;display:none;flex-direction:column;gap:14px;
+    align-items:center;justify-content:center;background:#07211f;color:#e7d7b4;
+    text-align:center;padding:30px;z-index:9}
+  #rotate b{font-family:'Yatra One',cursive;font-size:26px;color:#e0b458;letter-spacing:.5px}
+  #rotate span{font-size:17px;opacity:.75;max-width:280px;line-height:1.4}
+  @media (orientation:portrait) and (max-width:900px){#rotate{display:flex}#cv{opacity:.12}}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="rotate"><b>Tournez l'appareil</b><span>Jaipur se joue en paysage : le marché a besoin de largeur.</span></div>
+<script>
+"use strict";
+/* ============================================================
+   JAIPUR — Canvas 60 fps, solo contre l'ordinateur
+   Assets : images/spritesheet.png (cartes) + images/jetons.png
+   ============================================================ */
+
+/* ---------- 1. CONSTANTES ---------- */
+const W = 1500, H = 900;                       // resolution de reference
+const CW = 118, CH = 165;                      // taille carte de reference
+
+const GOODS = ['diamant','or','argent','tissu','epice','cuir'];
+const CHER  = new Set(['diamant','or','argent']);
+const LBL = {diamant:'Diamant',or:'Or',argent:'Argent',tissu:'Tissu',
+             epice:'Épice',cuir:'Cuir',chameau:'Chameau'};
+const LBLP = {diamant:'diamants',or:'or',argent:'argent',tissu:'tissus',
+              epice:'épices',cuir:'cuirs',chameau:'chameaux'};
+
+const CARD_COUNT = {diamant:6,or:6,argent:6,tissu:8,epice:8,cuir:10,chameau:11};
+const TOKEN_SET  = {diamant:[7,7,5,5,5], or:[6,6,5,5,5], argent:[5,5,5,5,5],
+                    tissu:[5,3,3,2,2,1,1], epice:[5,3,3,2,2,1,1],
+                    cuir:[4,3,2,1,1,1,1,1,1]};
+const BONUS_SET  = {3:[1,1,2,2,3,3], 4:[4,4,5,5,6,6], 5:[8,8,9,9,10,10]};
+
+/* decoupe des planches de sprites (mesuree sur les fichiers fournis) */
+const CARD_SRC = {
+  back:[374,0,369,516], diamant:[745,0,369,516], cuir:[1117,0,369,516],
+  or:[1489,0,370,516],  epice:[1861,0,370,516],  argent:[2233,0,369,516],
+  tissu:[2605,0,369,516], chameau:[2977,0,369,516]
+};
+const TKW = 4096/24, TKH = 171;
+const TOK_I = {
+  seal:0, camel:18, coins:22,
+  cuir:{1:1,2:2,3:3,4:4}, epice:{1:5,2:6,3:7,5:8}, tissu:{1:9,2:10,3:11,5:12},
+  argent:{5:13}, or:{5:14,6:15}, diamant:{5:16,7:17},
+  bonus:{3:19,4:20,5:21}
+};
+function tokSrc(i){ return [i*TKW, 0, TKW, TKH]; }
+function goodTokSrc(g,v){ const m=TOK_I[g]; return tokSrc(m[v]!==undefined?m[v]:m[Object.keys(m)[0]]); }
+
+/* palette : teal de la boite GameWorks + gres de Jaipur */
+const C = {
+  ink:'#07211f', felt:'#123f3c', felt2:'#0c2f2d', feltHi:'#1a5350',
+  gold:'#e0b458', goldLt:'#f7e2ab', goldDk:'#8a6a25',
+  sand:'#e7d7b4', sand2:'#c9b184', stone:'#6d5a3c',
+  rose:'#d8748f', spice:'#c8571f', jade:'#5fbfa0',
+  txt:'#f3ead6', dim:'rgba(243,234,214,.5)'
+};
+
+/* ---------- 2. OUTILS ---------- */
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const eOut=t=>1-Math.pow(1-t,3);
+const eInOut=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eBack=t=>{const c=1.7;return 1+ (c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2);};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]];}return a;}
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+function rr(x,y,w,h,r){
+  const c=ctx; r=Math.min(r,w/2,h/2); c.beginPath();
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath();
+}
+function txt(s,x,y,{size=16,font='Barlow Semi Condensed',weight=500,color=C.txt,
+   align='left',baseline='middle',ls=0,alpha=1}={}){
+  ctx.save(); ctx.globalAlpha*=alpha; ctx.fillStyle=color;
+  ctx.font=`${weight} ${size}px "${font}", sans-serif`;
+  ctx.textAlign=ls?'left':align; ctx.textBaseline=baseline;
+  if(ls){
+    let tot=0; for(const ch of s) tot+=ctx.measureText(ch).width+ls;
+    tot-=ls; let cx = align==='center'?x-tot/2 : align==='right'?x-tot : x;
+    for(const ch of s){ ctx.fillText(ch,cx,y); cx+=ctx.measureText(ch).width+ls; }
+  } else ctx.fillText(s,x,y);
+  ctx.restore();
+}
+function measure(s,size,weight=500,ls=0){
+  ctx.save(); ctx.font=`${weight} ${size}px "Barlow Semi Condensed", sans-serif`;
+  let w; if(ls){w=0;for(const ch of s)w+=ctx.measureText(ch).width+ls; w-=ls;}
+  else w=ctx.measureText(s).width; ctx.restore(); return w;
+}
+
+/* ---------- 3. CHARGEMENT DES PLANCHES ---------- */
+const IMG = {cards:null, tokens:null};
+function loadImg(paths){
+  return new Promise(res=>{
+    let i=0;
+    const step=()=>{
+      if(i>=paths.length){ res(null); return; }
+      const im=new Image(); im.onload=()=>res(im); im.onerror=()=>{i++;step();};
+      im.src=paths[i];
+    }; step();
+  });
+}
+async function loadAssets(){
+  const [a,b] = await Promise.all([
+    loadImg(['images/spritesheet.png','spritesheet.png','./images/spritesheet.png']),
+    loadImg(['images/jetons.png','jetons.png','./images/jetons.png'])
+  ]);
+  IMG.cards=a; IMG.tokens=b;
+}
+
+/* ---------- 4. DESSIN DES CARTES / JETONS ---------- */
+const FALLBACK = {diamant:'#c0392b',or:'#d9a017',argent:'#7f95a8',tissu:'#8e5aa8',
+                  epice:'#5c9e3f',cuir:'#96694a',chameau:'#c9a06b',back:'#c2536f'};
+
+function drawCardSprite(type,x,y,w,h,r=9){
+  const c=ctx;
+  c.save(); rr(x,y,w,h,r); c.clip();
+  if(IMG.cards && CARD_SRC[type]){
+    const s=CARD_SRC[type];
+    c.drawImage(IMG.cards,s[0],s[1],s[2],s[3],x,y,w,h);
+  } else {
+    const g=c.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0,FALLBACK[type]||'#555'); g.addColorStop(1,'rgba(0,0,0,.45)');
+    c.fillStyle=g; c.fillRect(x,y,w,h);
+    txt(type==='back'?'JAIPUR':LBL[type]||'?', x+w/2, y+h/2,
+        {size:Math.max(11,w*.14),align:'center',color:'#fff',weight:700});
+  }
+  c.restore();
+  c.save(); rr(x,y,w,h,r); c.lineWidth=Math.max(1,w*.012);
+  c.strokeStyle='rgba(0,0,0,.35)'; c.stroke(); c.restore();
+}
+
+function drawTokenSprite(src,cx,cy,d){
+  const c=ctx;
+  if(IMG.tokens){ c.drawImage(IMG.tokens,src[0],src[1],src[2],src[3],cx-d/2,cy-d/2,d,d); }
+  else { c.save(); c.beginPath(); c.arc(cx,cy,d/2,0,7); c.fillStyle=C.gold; c.fill();
+         c.strokeStyle='rgba(0,0,0,.4)'; c.lineWidth=2; c.stroke(); c.restore(); }
+}
+
+/* pastille de valeur, lisible a petite taille */
+function valueBadge(cx,cy,v,d,tone=C.goldLt){
+  const c=ctx, r=d*0.29;
+  c.save();
+  c.beginPath(); c.arc(cx,cy,r,0,7);
+  c.fillStyle='rgba(7,33,31,.86)'; c.fill();
+  c.lineWidth=Math.max(1,d*.035); c.strokeStyle=tone; c.stroke();
+  c.restore();
+  txt(String(v),cx,cy+d*.015,{size:d*.36,align:'center',color:tone,weight:700});
+}
+
+/* ---------- 5. ENTITES VISUELLES ---------- */
+let UID=1;
+class VCard{
+  constructor(type,x,y){
+    this.id=UID++; this.type=type;
+    this.x=x; this.y=y; this.tx=x; this.ty=y; this.vx=0; this.vy=0;
+    this.rot=0; this.trot=0; this.vr=0;
+    this.sc=1; this.tsc=1; this.vs=0;
+    this.flip=0; this.tflip=0;              // 0 = dos, 1 = face
+    this.lift=0; this.tlift=0;
+    this.z=0; this.jit=rnd(-.06,.06); this.glow=0; this.tglow=0;
+    this.hot=0;
+  }
+  step(dt){
+    const K=190, D=2*Math.sqrt(K)*0.92;
+    this.vx += (-K*(this.x-this.tx) - D*this.vx)*dt; this.x += this.vx*dt;
+    this.vy += (-K*(this.y-this.ty) - D*this.vy)*dt; this.y += this.vy*dt;
+    this.vr += (-K*(this.rot-this.trot) - D*this.vr)*dt; this.rot += this.vr*dt;
+    this.vs += (-K*(this.sc-this.tsc) - D*this.vs)*dt; this.sc += this.vs*dt;
+    const k=1-Math.exp(-13*dt);
+    this.flip += (this.tflip-this.flip)*k;
+    this.lift += (this.tlift-this.lift)*k;
+    this.glow += (this.tglow-this.glow)*k;
+    this.hot  += ((this.hotT||0)-this.hot)*(1-Math.exp(-16*dt));
+  }
+  get speed(){ return Math.hypot(this.vx,this.vy); }
+  draw(){
+    const c=ctx, w=CW*this.sc, h=CH*this.sc;
+    const f=clamp(this.flip,0,1);
+    const sx=Math.abs(Math.cos(Math.PI*(1-f)));         // effet de retournement
+    const face = f>0.5;
+    c.save();
+    c.translate(this.x, this.y-this.lift);
+    c.rotate(this.rot);
+    // ombre portee, plus marquee quand la carte "vole"
+    const fly=clamp(this.speed/650,0,1)+this.lift/60;
+    c.save();
+    c.shadowColor=`rgba(0,0,0,${(0.42+fly*0.24).toFixed(2)})`;
+    c.shadowBlur=9+fly*24; c.shadowOffsetY=5+fly*13;
+    c.fillStyle='#0a0a0a'; rr(-w/2,-h/2,w,h,10*this.sc); c.fill();
+    c.restore();
+    c.scale(Math.max(.02,sx),1);
+    if(this.glow>0.01){
+      c.save(); c.shadowColor=C.goldLt; c.shadowBlur=26*this.glow;
+      c.fillStyle='rgba(0,0,0,0)'; rr(-w/2,-h/2,w,h,10*this.sc); c.fill(); c.restore();
+    }
+    drawCardSprite(face?this.type:'back', -w/2, -h/2, w, h, 10*this.sc);
+    if(this.glow>0.01){
+      c.save(); rr(-w/2,-h/2,w,h,10*this.sc);
+      c.lineWidth=3*this.sc; c.strokeStyle=`rgba(247,226,171,${.9*this.glow})`; c.stroke();
+      c.restore();
+    }
+    if(this.hot>0.01){
+      c.save(); rr(-w/2,-h/2,w,h,10*this.sc);
+      c.lineWidth=2*this.sc; c.strokeStyle=`rgba(247,226,171,${.5*this.hot})`; c.stroke();
+      c.restore();
+    }
+    c.restore();
+  }
+}
+
+class VTok{
+  constructor(kind,good,val,x,y,faceDown=false){
+    this.kind=kind;            // 'good' | 'bonus' | 'camel' | 'seal'
+    this.good=good; this.val=val;
+    this.x=x;this.y=y;this.tx=x;this.ty=y;this.vx=0;this.vy=0;
+    this.d=40; this.td=40; this.vd=0;
+    this.hidden=faceDown; this.rot=0; this.trot=0; this.vr=0; this.pop=0;
+  }
+  step(dt){
+    const K=210, D=2*Math.sqrt(K)*0.9;
+    this.vx += (-K*(this.x-this.tx) - D*this.vx)*dt; this.x += this.vx*dt;
+    this.vy += (-K*(this.y-this.ty) - D*this.vy)*dt; this.y += this.vy*dt;
+    this.vd += (-K*(this.d-this.td) - D*this.vd)*dt; this.d += this.vd*dt;
+    this.vr += (-K*(this.rot-this.trot) - D*this.vr)*dt; this.rot += this.vr*dt;
+    this.pop=Math.max(0,this.pop-dt*2.2);
+  }
+  src(){
+    if(this.kind==='camel') return tokSrc(TOK_I.camel);
+    if(this.kind==='seal')  return tokSrc(TOK_I.seal);
+    if(this.kind==='bonus') return tokSrc(TOK_I.bonus[this.tier||3]);
+    return goodTokSrc(this.good,this.val);
+  }
+  draw(showVal=true){
+    const c=ctx; c.save(); c.translate(this.x,this.y); c.rotate(this.rot);
+    const d=this.d*(1+this.pop*.18);
+    c.save(); c.shadowColor='rgba(0,0,0,.45)'; c.shadowBlur=6; c.shadowOffsetY=3;
+    c.beginPath(); c.arc(0,0,d/2,0,7); c.fillStyle='#0a0a0a'; c.fill(); c.restore();
+    drawTokenSprite(this.src(),0,0,d);
+    if(showVal && !this.hidden && (this.kind==='good'||this.kind==='bonus')) valueBadge(0,0,this.val,d);
+    if(this.kind==='camel' && showVal) valueBadge(0,0,5,d);
+    c.restore();
+  }
+}
+
+/* particules / textes flottants */
+const fx=[];
+function floatText(s,x,y,color=C.goldLt,size=30){
+  fx.push({t:'txt',s,x,y,vy:-46,life:1.35,age:0,color,size});
+}
+function burst(x,y,n=16,color=C.goldLt){
+  for(let i=0;i<n;i++){
+    const a=rnd(0,6.283), sp=rnd(70,300);
+    fx.push({t:'p',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-70,life:rnd(.5,1.1),age:0,
+             color,r:rnd(1.6,4.2)});
+  }
+}
+function stepFx(dt){
+  for(let i=fx.length-1;i>=0;i--){
+    const p=fx[i]; p.age+=dt;
+    if(p.age>=p.life){ fx.splice(i,1); continue; }
+    if(p.t==='p'){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=520*dt; p.vx*=(1-1.6*dt); }
+    else { p.y+=p.vy*dt; p.vy*=(1-1.1*dt); }
+  }
+}
+function drawFx(){
+  for(const p of fx){
+    const k=1-p.age/p.life;
+    ctx.save(); ctx.globalAlpha=clamp(k*1.4,0,1);
+    if(p.t==='p'){ ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r*k+0.6,0,7); ctx.fill(); }
+    else txt(p.s,p.x,p.y,{size:p.size,align:'center',color:p.color,weight:700,font:'Yatra One'});
+    ctx.restore();
+  }
+}
+
+/* ---------- 6. DECOR : arcades de gres ---------- */
+function jharokha(x,y,w,h,alpha=1){
+  /* silhouette d'arche rajasthani derriere un emplacement du marche */
+  const c=ctx, r=w/2;
+  c.save(); c.globalAlpha=alpha;
+  c.beginPath();
+  c.moveTo(x, y+h);
+  c.lineTo(x, y+r*0.62);
+  c.quadraticCurveTo(x, y+r*0.1, x+r*0.35, y+r*0.06);
+  c.quadraticCurveTo(x+r*0.72, y-r*0.16, x+r, y-r*0.34);
+  c.quadraticCurveTo(x+w-r*0.72, y-r*0.16, x+w-r*0.35, y+r*0.06);
+  c.quadraticCurveTo(x+w, y+r*0.1, x+w, y+r*0.62);
+  c.lineTo(x+w, y+h); c.closePath();
+  const g=c.createLinearGradient(x,y-r*.34,x,y+h);
+  g.addColorStop(0,'rgba(231,215,180,.20)');
+  g.addColorStop(.55,'rgba(201,177,132,.10)');
+  g.addColorStop(1,'rgba(201,177,132,.02)');
+  c.fillStyle=g; c.fill();
+  c.lineWidth=1.6; c.strokeStyle='rgba(231,215,180,.22)'; c.stroke();
+  c.restore();
+}
+function chhatri(cx,cy,r,alpha=1){
+  const c=ctx; c.save(); c.globalAlpha=alpha;
+  c.beginPath();
+  c.moveTo(cx-r,cy);
+  c.quadraticCurveTo(cx-r*.98, cy-r*.86, cx, cy-r*1.05);
+  c.quadraticCurveTo(cx+r*.98, cy-r*.86, cx+r, cy);
+  c.closePath();
+  c.fillStyle='rgba(231,215,180,.14)'; c.fill();
+  c.lineWidth=1.6; c.strokeStyle='rgba(231,215,180,.26)'; c.stroke();
+  c.beginPath(); c.moveTo(cx,cy-r*1.05); c.lineTo(cx,cy-r*1.32);
+  c.stroke();
+  c.beginPath(); c.arc(cx,cy-r*1.4,r*.09,0,7); c.fillStyle='rgba(224,180,88,.5)'; c.fill();
+  c.restore();
+}
+/* trame jali discrete sur le feutre */
+let jaliPat=null;
+function makeJali(){
+  const s=44, cn=document.createElement('canvas'); cn.width=cn.height=s;
+  const g=cn.getContext('2d');
+  g.strokeStyle='rgba(231,215,180,.045)'; g.lineWidth=1;
+  for(let i=-1;i<=1;i++){
+    g.beginPath(); g.moveTo(-s*i,0); g.lineTo(s-s*i,s); g.stroke();
+    g.beginPath(); g.moveTo(s+s*i,0); g.lineTo(s*i,s); g.stroke();
+  }
+  g.beginPath(); g.arc(s/2,s/2,5,0,7); g.stroke();
+  jaliPat=ctx.createPattern(cn,'repeat');
+}
+
+/* ---------- 7. ETAT DE JEU ---------- */
+const S = {
+  screen:'menu',            // menu | jeu | manche | fin
+  round:1, seals:{p:0,a:0},
+  deck:[], market:[], discard:[],
+  hand:{p:[],a:[]}, herd:{p:[],a:[]},
+  tokens:{},                 // good -> [valeurs decroissantes]
+  tokenV:{},                 // good -> [VTok] visibles au comptoir
+  bonus:{3:[],4:[],5:[]},
+  purse:{p:[],a:[]},         // VTok gagnes
+  turn:'p', busy:true,
+  sel:{market:new Set(), hand:new Set(), camels:0},
+  log:[], msg:'', hintAI:'',
+  endInfo:null, over:null, showRules:false,
+  camelTokenTo:null,
+  oppMin:[0,0,0,0,0,0],      /* cartes que le joueur a prises ouvertement (borne basse) */
+  diff:2, thinking:false, aiDepth:0, aiNodes:0
+};
+
+/* ---------- 8. GEOMETRIE ---------- */
+const L = {
+  deck:{x:374,y:404},
+  discard:{x:1172,y:404},
+  slot:i=>({x:512+i*134, y:404}),
+  handP:{x:700,y:742},
+  handA:{x:700,y:132},
+  herdP:{x:1112,y:742},
+  herdA:{x:1112,y:132},
+  purseP:{x:1300,y:700},
+  purseA:{x:1300,y:210},
+  comptoir:{x:36,y:96,w:250},
+  actions:{y:566}
+};
+
+function layout(){
+  /* pioche */
+  S.deck.forEach((c,i)=>{
+    c.tx=L.deck.x - i*0.22; c.ty=L.deck.y - i*0.5;
+    c.trot=c.jit*0.10; c.tsc=0.94; c.tflip=0; c.z=i; c.tlift=0;
+  });
+  /* defausse */
+  S.discard.forEach((c,i)=>{
+    c.tx=L.discard.x + c.jit*13; c.ty=L.discard.y - i*0.35 + c.jit*10;
+    c.trot=c.jit*2.6; c.tsc=0.74; c.tflip=1; c.z=i;
+  });
+  /* marche */
+  S.market.forEach((c,i)=>{
+    const p=L.slot(i);
+    const on=S.sel.market.has(c.id);
+    c.tx=p.x; c.ty=p.y - (on?16:0); c.trot=0; c.tsc=1; c.tflip=1;
+    c.tglow=on?1:0; c.z=100+i; c.tlift=on?8:0;
+  });
+  /* mains */
+  fanHand(S.hand.p, L.handP, 1, true);
+  fanHand(S.hand.a, L.handA, 0.72, false);
+  /* enclos */
+  herdStack(S.herd.p, L.herdP, 1, S.sel.camels);
+  herdStack(S.herd.a, L.herdA, 0.72);
+  /* bourses */
+  purseStack(S.purse.p, L.purseP);
+  purseStack(S.purse.a, L.purseA);
+  /* comptoir */
+  layoutComptoir();
+}
+function fanHand(arr,pos,scale,sel){
+  const n=arr.length; if(!n) return;
+  const step=Math.min(CW*scale+12, 660/Math.max(n,1));
+  const total=(n-1)*step;
+  /* la main du joueur se range par famille (ordre du comptoir), puis par ancienneté */
+  const list = sel ? arr.slice().sort((x,y)=>(GI[x.type]-GI[y.type]) || (x.id-y.id)) : arr;
+  list.forEach((c,i)=>{
+    const on = sel && S.sel.hand.has(c.id);
+    const t=n>1? i/(n-1)-0.5 : 0;
+    c.tx=pos.x - total/2 + i*step;
+    c.ty=pos.y + t*t*15*(sel?-1:1) - (on?22:0);
+    c.trot=t*0.075; c.tsc=scale; c.tflip=sel?1:0;
+    c.tglow=on?1:0; c.z=200+i; c.tlift=on?10:0;
+  });
+}
+function herdStack(arr,pos,scale,selN=0){
+  const n=arr.length;
+  arr.forEach((c,i)=>{
+    const on = selN>0 && i>=n-selN;
+    c.tx=pos.x + i*7; c.ty=pos.y - i*3.2 - (on?24:0);
+    c.trot=c.jit*0.5; c.tsc=scale*0.78; c.tflip=1; c.z=300+i;
+    c.tglow=on?1:0; c.tlift=on?8:0;
+  });
+}
+function purseStack(arr,pos){
+  arr.forEach((t,i)=>{
+    const col=i%7, row=(i/7)|0;
+    t.tx=pos.x + col*17 - 51; t.ty=pos.y + row*17; t.td=32; t.trot=0;
+  });
+}
+function layoutComptoir(){
+  const {x,y}=L.comptoir; const rowH=46, d=40;
+  GOODS.forEach((g,gi)=>{
+    const arr=S.tokenV[g]; const n=arr.length;
+    const cy=y+gi*rowH+22;
+    const step=n>1?Math.min(21,(200-d)/(n-1)):0;
+    arr.forEach((t,i)=>{
+      t.tx=x+30+i*step; t.ty=cy; t.td=(i===n-1)?46:d; t.trot=0;
+    });
+  });
+  const by=y+6*rowH+42;
+  [3,4,5].forEach((k,i)=>{
+    S.bonus[k].forEach((t,j)=>{ t.tx=x+34+i*68; t.ty=by - j*0.7; t.td=46; });
+  });
+}
+
+/* ---------- 9. MISE EN PLACE ---------- */
+function newGame(){
+  S.round=1; S.seals={p:0,a:0}; S.over=null; S.log=[];
+  newRound(true);
+}
+function newRound(first=false){
+  S.deck=[]; S.market=[]; S.discard=[]; S.hand={p:[],a:[]}; S.herd={p:[],a:[]};
+  S.purse={p:[],a:[]}; S.sel={market:new Set(),hand:new Set(),camels:0};
+  S.oppMin=[0,0,0,0,0,0];
+  S.endInfo=null; S.camelTokenTo=null; fx.length=0;
+
+  /* jetons marchandises */
+  S.tokens={}; S.tokenV={};
+  for(const g of GOODS){
+    S.tokens[g]=TOKEN_SET[g].slice();                 // decroissant
+    S.tokenV[g]=S.tokens[g].slice().reverse()         // affiche : petit -> grand
+      .map(v=>new VTok('good',g,v,-60,300));
+  }
+  /* jetons bonus */
+  for(const k of [3,4,5]){
+    S.bonus[k]=shuffle(BONUS_SET[k].slice()).map(v=>{
+      const t=new VTok('bonus',null,v,-60,300,true); t.tier=k; return t;
+    });
+  }
+  /* cartes */
+  const pool=[];
+  for(const g of GOODS) for(let i=0;i<CARD_COUNT[g];i++) pool.push(g);
+  const camels=[]; for(let i=0;i<CARD_COUNT.chameau;i++) camels.push('chameau');
+  /* 3 chameaux au marche, le reste melange */
+  const rest=shuffle(pool.concat(camels.slice(3)));
+  S.market = camels.slice(0,3).map(()=>new VCard('chameau',L.deck.x,L.deck.y));
+  S.deck = rest.map(t=>new VCard(t,L.deck.x,L.deck.y));
+  layout();
+  S.busy=true; S.screen='jeu';
+  S.msg = first?'Nouvelle partie — le marché s\'installe':'Manche '+S.round;
+  dealAnim();
+}
+async function dealAnim(){
+  layout(); await wait(240);
+  for(let i=0;i<5;i++){
+    for(const who of ['p','a']){
+      const c=S.deck.pop(); S.hand[who].push(c); layout();
+      await wait(58);
+    }
+  }
+  await wait(180);
+  /* completer le marche a 5 */
+  while(S.market.length<5 && S.deck.length){ S.market.push(S.deck.pop()); layout(); await wait(90); }
+  await wait(160);
+  /* les chameaux de la main vont a l'enclos */
+  for(const who of ['p','a']){
+    for(let i=S.hand[who].length-1;i>=0;i--){
+      if(S.hand[who][i].type==='chameau'){
+        const c=S.hand[who].splice(i,1)[0]; S.herd[who].push(c); layout(); await wait(70);
+      }
+    }
+  }
+  await wait(200);
+  S.busy=false;
+  S.turn = S.round===1 ? (Math.random()<0.5?'p':'a') : (S.lastLoser||'p');
+  logLine(S.turn==='p'?'À vous de jouer.':'L\'ordinateur commence.');
+  S.msg = S.turn==='p' ? 'À vous : prendre ou vendre' : 'L\'ordinateur réfléchit…';
+  if(S.turn==='a') aiTurn();
+}
+
+/* ---------- 10. REGLES / HELPERS ---------- */
+const handSize = who => S.hand[who].length;
+const countOf  = (who,g) => S.hand[who].filter(c=>c.type===g).length;
+const marketCamels = () => S.market.filter(c=>c.type==='chameau').length;
+const marketGoods  = () => S.market.filter(c=>c.type!=='chameau');
+const emptyPiles   = () => GOODS.filter(g=>S.tokens[g].length===0).length;
+
+function logLine(s){ S.log.push(s); if(S.log.length>9) S.log.shift(); }
+
+function takeTokens(who,g,n){
+  const got=[];
+  for(let i=0;i<n && S.tokens[g].length;i++){
+    S.tokens[g].shift();                        // la plus forte part en premier
+    const t=S.tokenV[g].pop();                  // visuellement, la derniere du degrade
+    got.push(t); S.purse[who].push(t); t.pop=1;
+  }
+  return got;
+}
+function takeBonus(who,n){
+  const tier = n>=5?5 : n===4?4 : 3;
+  if(!S.bonus[tier].length) return null;
+  const t=S.bonus[tier].pop();
+  t.hidden = (who==='a');
+  S.purse[who].push(t); t.pop=1;
+  return t;
+}
+function purseTotal(who){                 /* seulement ce qui est visible */
+  let s=0; for(const t of S.purse[who]) if(!t.hidden) s+= (t.kind==='camel'?5:t.val);
+  return s;
+}
+const hiddenTok = who => S.purse[who].filter(t=>t.hidden).length;
+
+/* fin de manche ? */
+function roundOver(){
+  if(emptyPiles()>=3) return 'Trois piles de jetons sont épuisées.';
+  if(S.market.length<5) return 'La pioche est vide : le marché ne peut plus être complété.';
+  return null;
+}
+
+async function refillMarket(){
+  while(S.market.length<5 && S.deck.length){
+    S.market.push(S.deck.pop()); layout(); await wait(105);
+  }
+  layout();
+}
+
+/* ---------- 11. ACTIONS ---------- */
+async function actTakeOne(who,card){
+  const i=S.market.indexOf(card); if(i<0) return;
+  S.market.splice(i,1);
+  if(card.type==='chameau') S.herd[who].push(card); else S.hand[who].push(card);
+  if(who==='p' && card.type!=='chameau') S.oppMin[GI[card.type]]++;
+  card.tsc=1.12; layout(); await wait(300);
+  await refillMarket();
+  logLine((who==='p'?'Vous prenez':'L\'ordinateur prend')+' 1 '+LBL[card.type].toLowerCase()+'.');
+}
+async function actTakeCamels(who){
+  const taken=[];
+  for(let i=S.market.length-1;i>=0;i--)
+    if(S.market[i].type==='chameau') taken.push(S.market.splice(i,1)[0]);
+  taken.reverse();
+  for(const c of taken){ S.herd[who].push(c); layout(); await wait(85); }
+  await wait(160);
+  await refillMarket();
+  logLine((who==='p'?'Vous prenez':'L\'ordinateur prend')+' '+taken.length+' chameau'+(taken.length>1?'x':'')+'.');
+}
+async function actTrade(who,marketCards,handCards,camelN){
+  /* on retire du marche et de la main, puis on echange */
+  const slots=marketCards.map(c=>S.market.indexOf(c)).sort((a,b)=>a-b);
+  for(let k=slots.length-1;k>=0;k--) S.market.splice(slots[k],1);
+  const given=[];
+  for(const c of handCards){ const i=S.hand[who].indexOf(c); if(i>=0){ S.hand[who].splice(i,1); given.push(c);} }
+  for(let i=0;i<camelN;i++){ const c=S.herd[who].pop(); if(c) given.push(c); }
+  /* les cartes rendues occupent les emplacements liberes */
+  slots.forEach((pos,k)=>{ if(given[k]) S.market.splice(pos,0,given[k]); });
+  for(const c of marketCards){
+    if(c.type==='chameau') S.herd[who].push(c); else S.hand[who].push(c);
+  }
+  if(who==='p'){
+    for(const c of marketCards) if(c.type!=='chameau') S.oppMin[GI[c.type]]++;
+    for(const c of handCards) if(c.type!=='chameau')
+      S.oppMin[GI[c.type]]=Math.max(0,S.oppMin[GI[c.type]]-1);
+  }
+  layout(); await wait(430);
+  logLine((who==='p'?'Vous troquez ':'L\'ordinateur troque ')+marketCards.length+' contre '+given.length+'.');
+}
+async function actSell(who,good,n){
+  const cards=[];
+  for(let i=S.hand[who].length-1;i>=0 && cards.length<n;i--)
+    if(S.hand[who][i].type===good) cards.push(S.hand[who].splice(i,1)[0]);
+  for(const c of cards){ S.discard.push(c); }
+  if(who==='p') S.oppMin[GI[good]]=Math.max(0,S.oppMin[GI[good]]-n);
+  layout(); await wait(340);
+
+  const got=takeTokens(who,good,n);
+  const dest = who==='p'?L.purseP:L.purseA;
+  let sum=0;
+  for(let i=0;i<got.length;i++){
+    const t=got[i];
+    t.x=L.comptoir.x+120; t.y=L.comptoir.y+GOODS.indexOf(good)*46+22;
+    layout(); sum+=t.val;
+    burst(t.x,t.y,7,C.goldLt);
+    await wait(90);
+  }
+  let bt=null, secret=false;
+  if(n>=3){
+    bt=takeBonus(who,n);
+    if(bt){ bt.x=L.comptoir.x+34+(n>=5?2:n-3)*68; bt.y=L.comptoir.y+6*46+42; layout();
+            secret=bt.hidden; if(!secret) sum+=bt.val;
+            burst(bt.x,bt.y,20,C.rose); await wait(170); }
+  }
+  floatText('+'+sum+(secret?' + ?':''), dest.x, dest.y-40, C.goldLt, 34);
+  if(n>=4) burst(dest.x,dest.y-20,26,C.gold);
+  logLine((who==='p'?'Vous vendez ':'L\'ordinateur vend ')+n+' '+LBLP[good]+
+          ' → +'+sum+(secret?' + prime secrète':(bt?' (prime comprise)':''))+'.');
+  await wait(320);
+}
+
+/* ---------- 12. ENCHAINEMENT DES TOURS ---------- */
+async function finishTurn(){
+  layout();
+  const why=roundOver();
+  if(why){ await wait(420); endRound(why); return; }
+  S.turn = S.turn==='p' ? 'a' : 'p';
+  if(S.turn==='a'){ S.msg='L\'ordinateur réfléchit…'; S.busy=true; await wait(120); aiTurn(); }
+  else { S.busy=false; S.msg='À vous : prendre ou vendre'; S.hintAI=''; }
+}
+function clearSel(){ S.sel.market.clear(); S.sel.hand.clear(); S.sel.camels=0; }
+
+async function doPlayer(fn){
+  if(S.busy) return; S.busy=true; clearSel(); layout();
+  await fn(); await finishTurn();
+}
+
+/* ---------- 13. FIN DE MANCHE ---------- */
+function endRound(why){
+  const cp=S.herd.p.length, ca=S.herd.a.length;
+  if(cp>ca) S.camelTokenTo='p'; else if(ca>cp) S.camelTokenTo='a'; else S.camelTokenTo=null;
+  if(S.camelTokenTo){
+    const t=new VTok('camel',null,5, S.camelTokenTo==='p'?L.herdP.x:L.herdA.x,
+                     S.camelTokenTo==='p'?L.herdP.y:L.herdA.y);
+    S.purse[S.camelTokenTo].push(t); t.pop=1;
+  }
+  for(const t of S.purse.a) t.hidden=false;
+  layout();
+
+  const tot={p:purseTotal('p'), a:purseTotal('a')};
+  const bon={p:S.purse.p.filter(t=>t.kind==='bonus').length, a:S.purse.a.filter(t=>t.kind==='bonus').length};
+  const mar={p:S.purse.p.filter(t=>t.kind==='good').length, a:S.purse.a.filter(t=>t.kind==='good').length};
+  let win;
+  if(tot.p!==tot.a) win = tot.p>tot.a?'p':'a';
+  else if(bon.p!==bon.a) win = bon.p>bon.a?'p':'a';
+  else if(mar.p!==mar.a) win = mar.p>mar.a?'p':'a';
+  else win='p';
+  S.seals[win]++; S.lastLoser = win==='p'?'a':'p';
+  S.endInfo={why,tot,bon,mar,win,camels:{p:cp,a:ca}};
+  S.screen='manche'; S.busy=true;
+  logLine('Manche '+S.round+' : '+(win==='p'?'vous gagnez':'l\'ordinateur gagne')+' ('+tot.p+' vs '+tot.a+').');
+  if(win==='p') burst(750,430,60,C.goldLt);
+  if(S.seals[win]>=2){ S.over=win; }
+}
+function nextRound(){
+  if(S.over){ S.screen='fin'; return; }
+  S.round++; newRound();
+}
+
+/* ============================================================
+   14. INTELLIGENCE DE L'ORDINATEUR
+   Recherche minimax avec elagage alpha-beta, repetee sur
+   plusieurs "mondes" tires au sort : la main cachee de
+   l'adversaire et l'ordre de la pioche sont echantillonnes,
+   jamais consultes. L'ordinateur ne raisonne que sur ce qu'un
+   joueur humain attentif peut connaitre — plus le suivi des
+   cartes que vous prenez ouvertement au marche.
+   ============================================================ */
+
+const GI={}; GOODS.forEach((g,i)=>GI[g]=i);
+const TOKLEN=GOODS.map(g=>TOKEN_SET[g].length);
+const TOKPS =GOODS.map(g=>{const a=TOKEN_SET[g],p=[0];
+                           for(let i=0;i<a.length;i++)p.push(p[i]+a[i]);return p;});
+const MIN2  =GOODS.map(g=>CHER.has(g));
+const BONEV =[2,5,9];                       /* esperance des primes 3 / 4 / 5+ */
+const topVal=(g,tk)=> tk<TOKLEN[g] ? TOKEN_SET[GOODS[g]][tk] : 0;
+const sumTop=(g,tk,k)=> TOKPS[g][Math.min(tk+k,TOKLEN[g])]-TOKPS[g][tk];
+const bonEV =n=> n>=5?BONEV[2] : n===4?BONEV[1] : n===3?BONEV[0] : 0;
+
+/* etat compact : un Int16Array de 33 cases */
+const IH=0, IO=6, ICM=12, ICO=13, IMK=14, IMC=20, ITK=21, IBN=27,
+      IRM=30, IRO=31, IDP=32, SLEN=33;
+const MAXD=14, MAXM=72;
+const POOL=[], MPOOL=[], MSC=[], MORD=[], TVS=[], CDV=[], CDG=[];
+for(let d=0;d<=MAXD;d++){
+  POOL[d]=new Int16Array(SLEN);
+  MPOOL[d]=[]; for(let i=0;i<MAXM;i++) MPOOL[d].push(new Int8Array(15));
+  MSC[d]=new Float32Array(MAXM); MORD[d]=new Int8Array(MAXM);
+  TVS[d]=new Int8Array(6); CDV[d]=new Float32Array(8); CDG[d]=new Int8Array(8);
+}
+let DSEQ=new Int8Array(0), NODES=0, DEADLINE=0, ABORT=false, SEALW=32;
+const nowms=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+
+/* ---- application d'un coup ---- */
+function drawTo(st,n){
+  for(let i=0;i<n;i++){
+    if(st[IDP]>=DSEQ.length) return;
+    const c=DSEQ[st[IDP]++];
+    if(c===6) st[IMC]++; else st[IMK+c]++;
+  }
+}
+function applyMove(st,m,side){
+  const off=side===0?IH:IO, ci=side===0?ICM:ICO, ri=side===0?IRM:IRO;
+  switch(m[0]){
+    case 0:{ const g=m[1],k=m[2],tk=st[ITK+g];
+      st[off+g]-=k;
+      const n=Math.min(k,TOKLEN[g]-tk);
+      st[ri]+=sumTop(g,tk,n); st[ITK+g]=tk+n;
+      if(k>=3){ const t=k>=5?2:k-3; if(st[IBN+t]>0){ st[IBN+t]--; st[ri]+=BONEV[t]; } }
+      break; }
+    case 1:{ const g=m[1]; st[IMK+g]--; st[off+g]++; drawTo(st,1); break; }
+    case 2:{ const n=st[IMC]; st[IMC]=0; st[ci]+=n; drawTo(st,n); break; }
+    case 3:{
+      for(let g=0;g<6;g++){ const t=m[3+g]; if(t){ st[IMK+g]-=t; st[off+g]+=t; } }
+      for(let g=0;g<6;g++){ const v=m[9+g]; if(v){ st[off+g]-=v; st[IMK+g]+=v; } }
+      if(m[2]){ st[ci]-=m[2]; st[IMC]+=m[2]; }
+      break; }
+  }
+}
+function marketSize(st){ let s=st[IMC]; for(let g=0;g<6;g++) s+=st[IMK+g]; return s; }
+function emptyCount(st){ let e=0; for(let g=0;g<6;g++) if(st[ITK+g]>=TOKLEN[g]) e++; return e; }
+function isOver(st){ return emptyCount(st)>=3 || marketSize(st)<5; }
+
+/* ---- evaluation ---- */
+function finalVal(st){
+  let a=st[IRM], b=st[IRO];
+  if(st[ICM]>st[ICO]) a+=5; else if(st[ICO]>st[ICM]) b+=5;
+  const d=a-b;
+  return d + (d>0?SEALW : d<0?-SEALW : 0);
+}
+function handVal(st,off,urg){
+  let v=0;
+  for(let g=0;g<6;g++){
+    const n=st[off+g]; if(!n) continue;
+    const tk=st[ITK+g], av=TOKLEN[g]-tk;
+    if(av<=0){ v+=0.05; continue; }
+    if(MIN2[g] && n===1){ v+=0.55*topVal(g,tk)*urg; continue; }
+    v += (sumTop(g,tk,Math.min(n,av))+bonEV(n)) * (0.52+0.46*urg);
+  }
+  return v;
+}
+function evalState(st){
+  const left=DSEQ.length-st[IDP];
+  const urg=Math.min(1,(left+3)/9);
+  let v=st[IRM]-st[IRO];
+  v += handVal(st,IH,urg)-handVal(st,IO,urg);
+  const d=st[ICM]-st[ICO], cl=Math.max(0,11-st[ICM]-st[ICO]);
+  v += 5*d/(Math.abs(d)+1+cl*0.32);
+  v += 0.42*Math.min(st[ICM],4)-0.42*Math.min(st[ICO],4);
+  let hs=0,os=0; for(let g=0;g<6;g++){ hs+=st[IH+g]; os+=st[IO+g]; }
+  v -= 0.32*Math.max(0,hs-5); v += 0.32*Math.max(0,os-5);
+  return v;
+}
+
+/* ---- heuristiques d'ordonnancement ---- */
+function keepVal(st,off,g){
+  const tk=st[ITK+g]; if(tk>=TOKLEN[g]) return 0.1;
+  const n=st[off+g];
+  let v=topVal(g,tk)*0.6;
+  if(MIN2[g]) v+=1.0;
+  if(n>=2) v+=1.2; if(n>=3) v+=1.6; if(n>=4) v+=2.0;
+  return v;
+}
+function wantVal(st,off,g){
+  const tk=st[ITK+g]; if(tk>=TOKLEN[g]) return 0.15;
+  const n=st[off+g]+1;
+  let v=topVal(g,tk);
+  if(MIN2[g]) v+=1.5;
+  if(n===2&&MIN2[g]) v+=1.6;
+  if(n===3) v+=2.0; else if(n===4) v+=2.4; else if(n>=5) v+=2.8;
+  if(st[off+g]>0) v+=0.7;
+  return v;
+}
+
+/* ---- generation des coups, sans allocation ---- */
+let GN=0, GST=null, GOFF=0, GCI=0, GOC=0, GD=0, GHS=0;
+function pushTrade(k){
+  const st=GST, d=GD, pool=MPOOL[d], sc=MSC[d], tv=TVS[d], cv=CDV[d], cg=CDG[d];
+  let nc=0;                                   /* cartes rendables, les moins utiles d'abord */
+  for(let i=0;i<6;i++){
+    if(tv[i] || !st[GOFF+i]) continue;
+    const val=keepVal(st,GOFF,i);
+    for(let j=0;j<st[GOFF+i] && nc<8;j++){
+      let p=nc++; while(p>0 && cv[p-1]>val){ cv[p]=cv[p-1]; cg[p]=cg[p-1]; p--; }
+      cv[p]=val; cg[p]=i;
+    }
+  }
+  const maxCam=Math.min(k, st[GCI], Math.max(0,7-GHS));
+  const vars=[];
+  if(maxCam>0) vars.push(maxCam);
+  if(nc>=k) vars.push(0);
+  if(k>=3 && maxCam>1 && nc>=k-1) vars.push(1);
+  for(let vi=0; vi<vars.length; vi++){
+    const cam=vars[vi], need=k-cam;
+    if(need<0 || need>nc || GHS+cam>7 || GN>=MAXM) continue;
+    const m=pool[GN]; m.fill(0); m[0]=3; m[2]=cam;
+    let cost=cam*(st[GCI]<=GOC+1?1.9:1.0), gain=0;
+    for(let i=0;i<6;i++) m[3+i]=tv[i];
+    for(let i=0;i<need;i++){ m[9+cg[i]]++; cost+=cv[i]; }
+    for(let i=0;i<6;i++) if(tv[i]){ const w=wantVal(st,GOFF,i);
+      for(let j=0;j<tv[i];j++) gain+=w-j*0.8; }
+    sc[GN]=gain-cost+0.9; GN++;
+  }
+}
+function recTrade(g,rem){
+  const st=GST, tv=TVS[GD];
+  if(g===6){ let k=0; for(let i=0;i<6;i++) k+=tv[i]; if(k>=2) pushTrade(k); return; }
+  const mx=Math.min(st[IMK+g],rem);
+  for(let t=0;t<=mx;t++){ tv[g]=t; recTrade(g+1,rem-t); if(GN>=MAXM) break; }
+  tv[g]=0;
+}
+function genMoves(st,side,d,W){
+  const off=side===0?IH:IO, ci=side===0?ICM:ICO, oc=side===0?st[ICO]:st[ICM];
+  const pool=MPOOL[d], sc=MSC[d], ord=MORD[d];
+  GN=0; GST=st; GOFF=off; GCI=ci; GOC=oc; GD=d;
+  let hs=0; for(let g=0;g<6;g++) hs+=st[off+g]; GHS=hs;
+
+  for(let g=0;g<6;g++){                                    /* ventes */
+    const have=st[off+g]; if(!have) continue;
+    const tk=st[ITK+g], av=TOKLEN[g]-tk; if(av<=0) continue;
+    const mn=MIN2[g]?2:1; if(have<mn) continue;
+    for(let k=mn;k<=have && GN<MAXM;k++){
+      const m=pool[GN]; m.fill(0); m[0]=0; m[1]=g; m[2]=k;
+      sc[GN]=sumTop(g,tk,Math.min(k,av))+bonEV(k)+(k===have?0.6:0)-(MIN2[g]?0:(k<3?3.5:0));
+      GN++;
+    }
+  }
+  if(hs<7) for(let g=0;g<6 && GN<MAXM;g++) if(st[IMK+g]>0){ /* prendre une marchandise */
+    const m=pool[GN]; m.fill(0); m[0]=1; m[1]=g; sc[GN]=wantVal(st,off,g); GN++;
+  }
+  if(st[IMC]>0 && GN<MAXM){                                 /* rafler les chameaux */
+    const m=pool[GN]; m.fill(0); m[0]=2;
+    sc[GN]=st[IMC]*1.3+(st[ci]<=oc?2.2:0)+(hs>=7?2.4:0)-0.85*st[IMC]; GN++;
+  }
+  TVS[d].fill(0); recTrade(0,4);                            /* trocs de 2 a 4 cartes */
+
+  const n=GN;
+  for(let i=0;i<n;i++) ord[i]=i;
+  for(let i=1;i<n;i++){ const a=ord[i], s=sc[a]; let j=i-1;
+    while(j>=0 && sc[ord[j]]<s){ ord[j+1]=ord[j]; j--; } ord[j+1]=a; }
+  return Math.min(n,W);
+}
+
+/* ---- recherche alpha-beta ---- */
+function search(st,d,alpha,beta,side){
+  if(isOver(st)) return finalVal(st);
+  if(d<=0) return evalState(st);
+  if((++NODES&1023)===0 && nowms()>DEADLINE) ABORT=true;
+  if(ABORT) return evalState(st);
+  const W = d>=4?11 : d===3?9 : 7;
+  const n=genMoves(st,side,d,W);
+  if(!n) return evalState(st);
+  const ord=MORD[d], pool=MPOOL[d], child=POOL[d];
+  let best = side===0 ? -1e9 : 1e9;
+  for(let i=0;i<n;i++){
+    child.set(st);
+    applyMove(child,pool[ord[i]],side);
+    const v=search(child,d-1,alpha,beta,1-side);
+    if(side===0){ if(v>best) best=v; if(best>alpha) alpha=best; }
+    else        { if(v<best) best=v; if(best<beta ) beta =best; }
+    if(beta<=alpha || ABORT) break;
+  }
+  return best;
+}
+
+/* ---- construction d'un monde plausible ---- */
+function buildRoot(){
+  const st=new Int16Array(SLEN);
+  for(const c of S.hand.a) st[IH+GI[c.type]]++;
+  for(let g=0;g<6;g++) st[IO+g]=S.oppMin[g];
+  st[ICM]=S.herd.a.length; st[ICO]=S.herd.p.length;
+  for(const c of S.market){ if(c.type==='chameau') st[IMC]++; else st[IMK+GI[c.type]]++; }
+  for(let g=0;g<6;g++) st[ITK+g]=TOKLEN[g]-S.tokens[GOODS[g]].length;
+  for(let t=0;t<3;t++) st[IBN+t]=S.bonus[t+3].length;
+  /* il connait ses propres primes, pas celles du joueur */
+  st[IRM]=S.purse.a.reduce((s,t)=>s+(t.kind==='camel'?5:t.val),0);
+  st[IRO]=S.purse.p.reduce((s,t)=>s+(t.kind==='camel'?5:
+            (t.kind==='bonus'?BONEV[(t.tier||3)-3]:t.val)),0);
+  st[IDP]=0;
+  const unseen=[6,6,6,8,8,10,11];
+  const sub=t=>{ unseen[t==='chameau'?6:GI[t]]--; };
+  for(const c of S.hand.a) sub(c.type);
+  for(const c of S.market) sub(c.type);
+  for(const c of S.discard) sub(c.type);
+  unseen[6]-=S.herd.a.length+S.herd.p.length;
+  for(let g=0;g<6;g++) unseen[g]-=S.oppMin[g];
+  for(let i=0;i<7;i++) if(unseen[i]<0) unseen[i]=0;
+  let known=0; for(let g=0;g<6;g++) known+=S.oppMin[g];
+  return {st,unseen,hidden:Math.max(0,S.hand.p.length-known)};
+}
+function determinize(root){
+  const un=root.unseen.slice(), st=root.st.slice();
+  let left=0; for(let g=0;g<6;g++) left+=un[g];
+  for(let k=0;k<root.hidden && left>0;k++){        /* jamais de chameau dans une main */
+    let r=Math.random()*left, g=0;
+    while(g<5 && r>=un[g]){ r-=un[g]; g++; }
+    if(un[g]<=0){ g=0; while(g<6 && un[g]<=0) g++; if(g===6) break; }
+    un[g]--; left--; st[IO+g]++;
+  }
+  const seq=[];
+  for(let i=0;i<7;i++) for(let j=0;j<un[i];j++) seq.push(i);
+  shuffle(seq);
+  return {st,seq:Int8Array.from(seq)};
+}
+
+/* ---- niveaux ---- */
+const AI_LEVELS=[
+  {name:'Marchand',  budget:80,  worlds:2, maxd:3, noise:2.4},
+  {name:'Négociant', budget:320, worlds:4, maxd:5, noise:0.9},
+  {name:'Maharaja',  budget:900, worlds:7, maxd:12, noise:0.0}
+];
+const yieldNow=()=>new Promise(r=>setTimeout(r,0));
+
+async function chooseMove(){
+  const cfg=AI_LEVELS[S.diff];
+  SEALW=(S.seals.a>=1||S.seals.p>=1)?48:32;   /* manche decisive : on joue le tout pour le tout */
+  const root=buildRoot();
+  const rootMoves=[];
+  { const n=genMoves(root.st,0,MAXD,26), ord=MORD[MAXD], pool=MPOOL[MAXD];
+    for(let i=0;i<n;i++) rootMoves.push(Int8Array.from(pool[ord[i]])); }
+  if(!rootMoves.length) return null;
+  if(rootMoves.length===1) return rootMoves[0];
+
+  const R=rootMoves.length, best=new Float64Array(R);
+  DEADLINE=nowms()+cfg.budget; ABORT=false; NODES=0;
+  let tick=nowms(), reached=0;
+
+  for(let d=2; d<=cfg.maxd; d++){
+    const tmp=new Float64Array(R); let full=true;
+    for(let w=0; w<cfg.worlds && full; w++){
+      const world=determinize(root); DSEQ=world.seq;
+      for(let i=0;i<R;i++){
+        const child=new Int16Array(world.st);
+        applyMove(child,rootMoves[i],0);
+        tmp[i]+=search(child,d-1,-1e9,1e9,1);
+        if(nowms()-tick>11){ await yieldNow(); tick=nowms(); ABORT=false; }
+        if(d>2 && nowms()>DEADLINE){ full=false; break; }
+      }
+    }
+    if(full){ best.set(tmp); reached=d; }
+    if(!full || nowms()>DEADLINE) break;
+  }
+  S.aiDepth=reached; S.aiNodes=NODES;
+
+  let bi=0, bv=-1e18;
+  for(let i=0;i<R;i++){
+    const v=best[i]+(cfg.noise?rnd(-cfg.noise,cfg.noise)*10:0);
+    if(v>bv){ bv=v; bi=i; }
+  }
+  return rootMoves[bi];
+}
+
+/* ---- traduction du coup abstrait vers les cartes reelles ---- */
+function pickMarket(g,k){ const o=[]; for(const c of S.market) if(c.type===GOODS[g]&&o.length<k) o.push(c); return o; }
+function pickHand(g,k){ const o=[]; for(const c of S.hand.a) if(c.type===GOODS[g]&&o.length<k) o.push(c); return o; }
+
+async function aiTurn(){
+  await wait(240);
+  S.thinking=true; S.msg='L\'ordinateur calcule';
+  const m=await chooseMove();
+  S.thinking=false;
+  if(!m){ logLine('L\'ordinateur passe son tour.'); await finishTurn(); return; }
+  const say=t=>{ S.msg='L\'ordinateur '+t; };
+  if(m[0]===0){ say('vend '+m[2]+' '+LBLP[GOODS[m[1]]]); await actSell('a',GOODS[m[1]],m[2]); }
+  else if(m[0]===1){ say('prend '+LBL[GOODS[m[1]]].toLowerCase());
+                     await actTakeOne('a',pickMarket(m[1],1)[0]); }
+  else if(m[0]===2){ const n=marketCamels(); say('rafle '+n+' chameau'+(n>1?'x':''));
+                     await actTakeCamels('a'); }
+  else {
+    const take=[],give=[];
+    for(let g=0;g<6;g++) if(m[3+g]) take.push(...pickMarket(g,m[3+g]));
+    for(let g=0;g<6;g++) if(m[9+g]) give.push(...pickHand(g,m[9+g]));
+    say('troque '+take.length+' cartes'); await actTrade('a',take,give,m[2]);
+  }
+  await wait(180);
+  await finishTurn();
+}
+
+/* ---------- 15. RENDU ---------- */
+let BTN=[];                       // zones cliquables reconstruites a chaque frame
+function button(id,label,x,y,w,h,o={}){
+  const hot = HOT.btn===id || o.active;
+  const c=ctx; c.save();
+  const pressed = hot && POINTER.down;
+  c.translate(0, pressed?1:0);
+  rr(x,y,w,h,h/2);
+  if(o.ghost){
+    c.fillStyle = hot?'rgba(231,215,180,.14)':'rgba(231,215,180,.05)';
+    c.fill(); c.lineWidth=1.4; c.strokeStyle='rgba(231,215,180,.34)'; c.stroke();
+    txt(label,x+w/2,y+h/2+1,{size:19,align:'center',color:hot?C.txt:C.dim,weight:600});
+  } else {
+    const g=c.createLinearGradient(x,y,x,y+h);
+    g.addColorStop(0, hot?'#f7e2ab':'#e0b458'); g.addColorStop(1, hot?'#d9a949':'#b98d33');
+    c.fillStyle=g; c.fill();
+    c.lineWidth=1.4; c.strokeStyle='rgba(255,255,255,.35)'; c.stroke();
+    txt(label,x+w/2,y+h/2+1,{size:20,align:'center',color:'#20140a',weight:700});
+  }
+  c.restore();
+  BTN.push({id,x,y,w,h});
+}
+
+function drawTable(){
+  const g=ctx.createRadialGradient(750,430,80,750,430,900);
+  g.addColorStop(0,C.feltHi); g.addColorStop(.45,C.felt); g.addColorStop(1,C.ink);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  if(jaliPat){ ctx.save(); ctx.fillStyle=jaliPat; ctx.fillRect(0,0,W,H); ctx.restore(); }
+  /* liseres or */
+  ctx.save(); ctx.strokeStyle='rgba(224,180,88,.22)'; ctx.lineWidth=2;
+  rr(14,14,W-28,H-28,18); ctx.stroke();
+  ctx.strokeStyle='rgba(224,180,88,.10)'; ctx.lineWidth=1;
+  rr(22,22,W-44,H-44,14); ctx.stroke();
+  ctx.restore();
+  /* separations des panneaux */
+  ctx.save(); ctx.strokeStyle='rgba(231,215,180,.10)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(302,40); ctx.lineTo(302,H-40); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(1232,40); ctx.lineTo(1232,H-40); ctx.stroke();
+  ctx.restore();
+}
+
+function drawArcade(){
+  /* signature : le marche est une galerie de gres, chaque carte sous son arche */
+  for(let i=0;i<5;i++){
+    const p=L.slot(i);
+    jharokha(p.x-CW/2-13, p.y-CH/2-16, CW+26, CH+46, S.market[i]?1:.45);
+  }
+  chhatri(L.deck.x, L.deck.y-CH/2-24, 62);
+  ctx.save();
+  ctx.strokeStyle='rgba(231,215,180,.16)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(316,L.slot(0).y+CH/2+32); ctx.lineTo(1216,L.slot(0).y+CH/2+32); ctx.stroke();
+  ctx.restore();
+  txt('LE MARCHÉ',766,L.slot(0).y+CH/2+52,{size:14,align:'center',color:C.dim,weight:600,ls:5});
+}
+
+function drawComptoir(){
+  const {x,y}=L.comptoir;
+  txt('COMPTOIR',x+8,66,{size:15,color:C.gold,weight:700,ls:5});
+  ctx.save(); ctx.strokeStyle='rgba(224,180,88,.25)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(x+8,78); ctx.lineTo(x+250,78); ctx.stroke(); ctx.restore();
+
+  GOODS.forEach((g,gi)=>{
+    const cy=y+gi*46+22;
+    txt(LBL[g].toUpperCase(),x+248,cy-16,{size:12,align:'right',color:C.dim,weight:600,ls:1.5});
+    if(!S.tokenV[g].length){
+      txt('épuisé',x+30,cy+2,{size:16,color:'rgba(216,116,143,.75)',weight:600});
+    }
+    for(const t of S.tokenV[g]) t.draw(false);
+    const last=S.tokenV[g][S.tokenV[g].length-1];
+    if(last) valueBadge(last.x,last.y,last.val,last.d);
+  });
+
+  const by=y+6*46+42;
+  txt('PRIMES DE VENTE',x+8,by-30,{size:12,color:C.dim,weight:600,ls:3});
+  [3,4,5].forEach((k,i)=>{
+    const px=x+34+i*68;
+    for(const t of S.bonus[k]) t.draw(false);
+    if(!S.bonus[k].length){ ctx.save(); ctx.setLineDash([3,4]);
+      ctx.beginPath(); ctx.arc(px,by,22,0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
+    txt((k===5?'5+':String(k))+' cartes',px,by+38,{size:13,align:'center',color:C.dim,weight:600});
+  });
+  /* jeton chameau + etat de la manche */
+  const cy2=by+94;
+  drawTokenSprite(tokSrc(TOK_I.camel),x+30,cy2,46); valueBadge(x+30,cy2,5,46);
+  txt('au plus grand',x+62,cy2-9,{size:14,color:C.dim,weight:600});
+  txt('troupeau, en fin de manche',x+62,cy2+11,{size:14,color:C.dim,weight:600});
+  const ep=emptyPiles();
+  txt('PILES ÉPUISÉES',x+8,cy2+66,{size:12,color:C.dim,weight:700,ls:3});
+  txt(ep+' / 3',x+248,cy2+66,{size:17,align:'right',color:ep>=2?C.rose:C.txt,weight:700});
+}
+
+function drawSeals(who,cx,cy){
+  for(let i=0;i<2;i++){
+    const got=S.seals[who]>i;
+    ctx.save(); ctx.globalAlpha=got?1:.20;
+    if(got) drawTokenSprite(tokSrc(TOK_I.seal),cx+i*32,cy,34);
+    else { ctx.beginPath(); ctx.arc(cx+i*32,cy,15,0,7);
+           ctx.setLineDash([3,4]); ctx.strokeStyle=C.sand; ctx.lineWidth=1.4; ctx.stroke(); }
+    ctx.restore();
+  }
+}
+
+function drawPanel(){
+  const px=1252;
+  txt('MANCHE '+S.round,px,52,{size:15,color:C.gold,weight:700,ls:4});
+  ctx.save(); ctx.strokeStyle='rgba(224,180,88,.25)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(px,66); ctx.lineTo(1466,66); ctx.stroke(); ctx.restore();
+
+  /* ordinateur */
+  txt('ORDINATEUR',px,100,{size:18,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:2});
+  if(S.turn==='a'&&S.screen==='jeu'){ ctx.save(); ctx.beginPath();
+    ctx.arc(px-12,100,4.5,0,7); ctx.fillStyle=C.gold; ctx.fill(); ctx.restore(); }
+  drawSeals('a',px+8,130);
+  txt(purseTotal('a')+(hiddenTok('a')?' + ?':'')+' roupies',1466,100,
+      {size:20,align:'right',color:C.goldLt,weight:700});
+  txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux',1466,130,
+      {size:15,align:'right',color:C.dim,weight:500});
+  txt(AI_LEVELS[S.diff].name+(S.aiDepth?' · profondeur '+S.aiDepth:''),1466,152,
+      {size:13,align:'right',color:C.dim,alpha:.75,weight:500});
+  for(const t of S.purse.a) t.draw(true);
+
+  /* journal */
+  txt('JOURNAL',px,336,{size:12,color:C.dim,weight:700,ls:4});
+  ctx.save(); ctx.strokeStyle='rgba(231,215,180,.12)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(px,346); ctx.lineTo(1466,346); ctx.stroke(); ctx.restore();
+  S.log.forEach((l,i)=>{
+    const a=0.35+0.65*((i+1)/S.log.length);
+    txt(l,px,368+i*23,{size:15,color:C.txt,alpha:a,weight:500});
+  });
+
+  /* joueur */
+  txt('VOUS',px,600,{size:18,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:2});
+  if(S.turn==='p'&&S.screen==='jeu'){ ctx.save(); ctx.beginPath();
+    ctx.arc(px-12,600,4.5,0,7); ctx.fillStyle=C.gold; ctx.fill(); ctx.restore(); }
+  drawSeals('p',px+8,630);
+  txt(purseTotal('p')+' roupies',1466,600,{size:20,align:'right',color:C.goldLt,weight:700});
+  txt(S.hand.p.length+'/7 cartes · '+S.herd.p.length+' chameaux',1466,630,
+      {size:15,align:'right',color:C.dim,weight:500});
+  for(const t of S.purse.p) t.draw(true);
+}
+
+function drawZones(){
+  txt('ORDINATEUR',330,52,{size:14,color:C.dim,weight:600,ls:4});
+  txt('VOTRE MAIN',330,838,{size:14,color:C.dim,weight:600,ls:4});
+  txt('ENCLOS',L.herdA.x,L.herdA.y-64,{size:12,align:'center',color:C.dim,weight:600,ls:3});
+  txt('ENCLOS',L.herdP.x,L.herdP.y-70,{size:12,align:'center',color:C.dim,weight:600,ls:3});
+  txt('PIOCHE '+S.deck.length,L.deck.x,L.deck.y+CH/2+18,{size:14,align:'center',color:C.dim,weight:600,ls:2});
+  txt('DÉFAUSSE',L.discard.x,L.discard.y+CH*0.42,{size:12,align:'center',color:C.dim,weight:600,ls:2});
+  /* bandeau de message */
+  let m=S.msg||'';
+  if(S.thinking) m+= '.'.repeat(1+((Date.now()/320)|0)%3);
+  if(m){
+    const w=measure(m,22,600)+56;
+    ctx.save(); rr(766-w/2,232,w,38,19);
+    ctx.fillStyle='rgba(7,33,31,.55)'; ctx.fill();
+    ctx.lineWidth=1; ctx.strokeStyle='rgba(224,180,88,.3)'; ctx.stroke(); ctx.restore();
+    txt(m,766,252,{size:22,align:'center',color:C.txt,weight:600});
+  }
+  if(S.sel.camels>0)
+    txt(S.sel.camels+' chameau'+(S.sel.camels>1?'x':'')+' à donner',L.herdP.x,L.herdP.y+62,
+        {size:15,align:'center',color:C.goldLt,weight:700});
+}
+
+function drawCards(){
+  const all=[];
+  const push=(a,base)=>a.forEach((c,i)=>{ c._z=base+i; all.push(c); });
+  push(S.deck,0); push(S.discard,90); push(S.market,300);
+  push(S.hand.a,500); push(S.herd.a,700);
+  push(S.hand.p,900); push(S.herd.p,1100);
+  for(const c of all) if(c.speed>50 || c.lift>2) c._z+=5000;
+  all.sort((x,y)=>x._z-y._z);
+  for(const c of all) c.draw();
+}
+
+function drawActions(){
+  if(S.screen!=='jeu') return;
+  const acts = S.busy? [] : playerActions();
+  if(!acts.length){
+    const h = handSize('p')>=7
+      ? 'Main pleine : vendez, troquez, ou prenez les chameaux.'
+      : 'Cliquez une carte du marché, ou vos cartes en main pour vendre. L\'enclos sert au troc.';
+    if(!S.busy) txt(h,766,L.actions.y+22,{size:17,align:'center',color:C.dim,weight:500});
+    return;
+  }
+  if(acts.length===1 && acts[0].id==='clear'){
+    const selM=S.market.filter(c=>S.sel.market.has(c.id));
+    const give=S.sel.hand.size+S.sel.camels;
+    const selH=S.hand.p.filter(c=>S.sel.hand.has(c.id));
+    let h='Sélection incomplète.';
+    if(selM.length>=2)
+      h='Troc : rendez '+selM.length+' carte'+(selM.length>1?'s':'')+
+        ' de votre main ou de l\'enclos — '+give+' sélectionnée'+(give>1?'s':'')+'.';
+    else if(selM.length===1 && handSize('p')>=7)
+      h='Main pleine : impossible de prendre une carte de plus.';
+    else if(selM.length===1)
+      h='Ajoutez une 2e carte du marché pour troquer.';
+    else if(selH.length){
+      const g=selH[0].type;
+      if(!selH.every(c=>c.type===g)) h='Une vente ne porte que sur un seul type de marchandise.';
+      else if(!S.tokens[g].length) h='Plus aucun jeton '+LBLP[g]+' : cette vente ne rapporte rien.';
+      else h='Diamant, or et argent : 2 cartes minimum pour vendre.';
+    }
+    txt(h,766,L.actions.y-16,{size:16,align:'center',color:C.dim,weight:500});
+  }
+  const ws=acts.map(a=>Math.max(180,measure(a.label,20,700)+52));
+  const gap=14, tot=ws.reduce((s,w)=>s+w,0)+gap*(acts.length-1);
+  let x=766-tot/2;
+  acts.forEach((a,i)=>{ button(a.id,a.label,x,L.actions.y,ws[i],46,{ghost:a.ghost}); x+=ws[i]+gap; });
+}
+
+/* ---------- overlays ---------- */
+function shade(a=.72){ ctx.fillStyle=`rgba(4,18,17,${a})`; ctx.fillRect(0,0,W,H); }
+
+function drawMenu(){
+  shade(.55);
+  ctx.save(); rr(430,132,640,640,26);
+  ctx.fillStyle='rgba(7,33,31,.92)'; ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle='rgba(224,180,88,.4)'; ctx.stroke(); ctx.restore();
+  chhatri(750,224,74);
+  txt('JAIPUR',750,300,{size:70,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  txt('DUEL DE MARCHANDS AU BAZAR',750,342,{size:16,align:'center',color:C.gold,weight:600,ls:4});
+  const lines=[
+    'Deux marchands, un marché de cinq cartes.',
+    'À chaque tour : prendre des cartes, ou vendre — jamais les deux.',
+    'Le plus riche en fin de manche emporte un Sceau d\'Excellence.'
+  ];
+  lines.forEach((l,i)=>txt(l,750,388+i*29,{size:19,align:'center',color:C.txt,alpha:.85}));
+  txt('ADVERSAIRE',750,500,{size:13,align:'center',color:C.dim,weight:700,ls:4});
+  AI_LEVELS.forEach((lv,i)=>{
+    button('lvl'+i,lv.name,460+i*198,516,186,42,{ghost:true,active:S.diff===i});
+  });
+  txt(['prend ses décisions vite et sans calcul',
+       'anticipe quelques coups à l\'avance',
+       'explore l\'arbre des coups et suit vos prises'][S.diff],
+      750,582,{size:15,align:'center',color:C.dim,weight:500});
+  button('play','Commencer la partie',590,614,320,54);
+  button('rules','Voir les règles',590,682,320,44,{ghost:true});
+  txt('Sébastien Pauchon · Alexandre Roche · GameWorks',750,748,
+      {size:14,align:'center',color:C.dim,weight:500});
+}
+
+const RULES=[
+  ['Prendre des cartes','Une seule marchandise du marché · ou tous les chameaux · ou un troc.'],
+  ['Le troc','Au moins 2 cartes contre 2. Vous rendez des marchandises et/ou des chameaux ; jamais une marchandise que vous prenez au même moment.'],
+  ['Vendre','Un seul type par tour. Les jetons les plus forts partent en premier. Diamant, or et argent : 2 cartes minimum.'],
+  ['Primes','3, 4 ou 5+ cartes vendues d\'un coup rapportent un jeton bonus, valeur cachée jusqu\'au décompte.'],
+  ['Chameaux','Ils ne se vendent jamais, ne comptent pas dans la limite de 7 cartes en main, et rapportent 5 roupies au plus gros troupeau.'],
+  ['Fin de manche','Trois piles de jetons épuisées, ou la pioche ne peut plus compléter le marché.']
+];
+function drawRules(){
+  shade(.82);
+  ctx.save(); rr(300,80,900,740,24);
+  ctx.fillStyle='rgba(7,33,31,.95)'; ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle='rgba(224,180,88,.4)'; ctx.stroke(); ctx.restore();
+  txt('LES RÈGLES',750,140,{size:40,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  let y=210;
+  for(const [h,b] of RULES){
+    txt(h.toUpperCase(),348,y,{size:15,color:C.gold,weight:700,ls:3});
+    const words=b.split(' '); let line='', yy=y+26;
+    for(const w of words){
+      const t=line?line+' '+w:w;
+      if(measure(t,18,500)>800){ txt(line,348,yy,{size:18,color:C.txt,alpha:.85}); line=w; yy+=25; }
+      else line=t;
+    }
+    txt(line,348,yy,{size:18,color:C.txt,alpha:.85});
+    y=yy+48;
+  }
+  button('closeRules','Fermer',630,740,240,48,{ghost:true});
+}
+
+function drawRoundEnd(){
+  shade(.78);
+  const e=S.endInfo; if(!e) return;
+  ctx.save(); rr(400,120,700,660,26);
+  ctx.fillStyle='rgba(7,33,31,.95)'; ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle='rgba(224,180,88,.45)'; ctx.stroke(); ctx.restore();
+  txt('FIN DE LA MANCHE '+S.round,750,182,{size:34,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  txt(e.why,750,220,{size:17,align:'center',color:C.dim,weight:500});
+
+  const rows=[
+    ['Jetons marchandises', e.mar.p, e.mar.a],
+    ['Jetons bonus', e.bon.p, e.bon.a],
+    ['Chameaux', e.camels.p, e.camels.a],
+    ['Jeton chameau (5)', S.camelTokenTo==='p'?'+5':'—', S.camelTokenTo==='a'?'+5':'—']
+  ];
+  txt('VOUS',700,270,{size:15,align:'right',color:C.gold,weight:700,ls:2});
+  txt('ORDINATEUR',1050,270,{size:15,align:'right',color:C.gold,weight:700,ls:2});
+  rows.forEach((r,i)=>{
+    const y=306+i*38;
+    txt(r[0],450,y,{size:19,color:C.txt,alpha:.8});
+    txt(String(r[1]),700,y,{size:19,align:'right',color:C.txt,weight:600});
+    txt(String(r[2]),1050,y,{size:19,align:'right',color:C.txt,weight:600});
+  });
+  ctx.save(); ctx.strokeStyle='rgba(224,180,88,.3)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(450,474); ctx.lineTo(1050,474); ctx.stroke(); ctx.restore();
+  txt('TOTAL',450,506,{size:22,color:C.goldLt,weight:700,ls:2});
+  txt(e.tot.p+' roupies',700,506,{size:24,align:'right',color:e.win==='p'?C.goldLt:C.txt,weight:700});
+  txt(e.tot.a+' roupies',1050,506,{size:24,align:'right',color:e.win==='a'?C.goldLt:C.txt,weight:700});
+
+  txt(e.win==='p'?'Vous emportez le Sceau d\'Excellence':'L\'ordinateur emporte le Sceau d\'Excellence',
+      750,566,{size:24,align:'center',color:C.txt,weight:600});
+  drawTokenSprite(tokSrc(TOK_I.seal),750,626,64);
+  txt('Sceaux — vous '+S.seals.p+' · ordinateur '+S.seals.a,750,684,
+      {size:18,align:'center',color:C.dim,weight:600});
+  button('next', S.over?'Voir le résultat':'Manche suivante',600,716,300,50);
+}
+
+function drawGameEnd(){
+  shade(.86);
+  const win=S.over==='p';
+  ctx.save(); rr(450,190,600,520,26);
+  ctx.fillStyle='rgba(7,33,31,.96)'; ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle='rgba(224,180,88,.5)'; ctx.stroke(); ctx.restore();
+  drawTokenSprite(tokSrc(TOK_I.seal),710,300,70);
+  drawTokenSprite(tokSrc(TOK_I.seal),790,300,70);
+  txt(win?'MARCHAND DU MAHARAJA':'LE BAZAR VOUS ÉCHAPPE',750,400,
+      {size:38,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  txt(win?'Deux sceaux, et une mère très fière de vous.'
+         :'L\'ordinateur rafle les deux sceaux. On remet ça ?',
+      750,452,{size:20,align:'center',color:C.txt,alpha:.85});
+  txt('Sceaux — vous '+S.seals.p+' · ordinateur '+S.seals.a,750,500,
+      {size:18,align:'center',color:C.dim,weight:600});
+  button('again','Nouvelle partie',600,566,300,54);
+  button('menu','Retour au menu',600,634,300,46,{ghost:true});
+}
+
+/* ---------- 16. ACTIONS DISPONIBLES POUR LE JOUEUR ---------- */
+function playerActions(){
+  const A=[];
+  const selM=S.market.filter(c=>S.sel.market.has(c.id));
+  const selH=S.hand.p.filter(c=>S.sel.hand.has(c.id));
+  const cam=S.sel.camels;
+  const mc=marketCamels();
+  const onlyCamels = selM.length>0 && selM.every(c=>c.type==='chameau');
+
+  if(onlyCamels && selH.length===0 && cam===0)
+    A.push({id:'camels',label:'Prendre '+mc+' chameau'+(mc>1?'x':'')});
+  else if(!selM.length && !selH.length && !cam && mc>0)
+    A.push({id:'camels',label:'Prendre '+mc+' chameau'+(mc>1?'x':'')});
+
+  if(selM.length===1 && !selH.length && !cam && selM[0].type!=='chameau' && handSize('p')<7)
+    A.push({id:'take',label:'Prendre '+LBL[selM[0].type].toLowerCase()});
+
+  if(selM.length>=2 && selM.every(c=>c.type!=='chameau')){
+    const give=selH.length+cam;
+    const tt=new Set(selM.map(c=>c.type));
+    const clash=selH.some(c=>tt.has(c.type));
+    if(give===selM.length && !clash && handSize('p')+cam<=7)
+      A.push({id:'trade',label:'Troquer '+selM.length+' contre '+give});
+  }
+
+  if(selH.length && !selM.length && !cam){
+    const g=selH[0].type;
+    if(selH.every(c=>c.type===g)){
+      const min=CHER.has(g)?2:1;
+      if(S.tokens[g].length && selH.length>=min)
+        A.push({id:'sell',label:'Vendre '+selH.length+' '+LBLP[g]});
+    }
+  }
+  if(selM.length||selH.length||cam) A.push({id:'clear',label:'Annuler',ghost:true});
+  if(!A.length && stuck()) A.push({id:'pass',label:'Passer le tour',ghost:true});
+  return A;
+}
+/* aucune action legale possible ? (garde-fou, tres rare) */
+function stuck(){
+  if(marketCamels()>0) return false;
+  if(handSize('p')<7 && marketGoods().length>0) return false;
+  for(const g of GOODS){
+    const n=countOf('p',g), min=CHER.has(g)?2:1;
+    if(n>=min && S.tokens[g].length) return false;
+  }
+  const gm=marketGoods();
+  if(gm.length>=2){
+    const tt=new Set(gm.map(c=>c.type));
+    const give=S.hand.p.filter(c=>!tt.has(c.type)).length + Math.min(S.herd.p.length,7-handSize('p'));
+    if(give>=2) return false;
+  }
+  return true;
+}
+
+/* ---------- 17. ENTREES ---------- */
+const VIEW={s:1,ox:0,oy:0};
+const POINTER={x:-9e3,y:-9e3,down:false};
+const HOT={btn:null,card:null};
+
+function hitBtn(x,y){ for(const b of BTN) if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h) return b; return null; }
+function cardAt(x,y){
+  if(S.screen!=='jeu'||S.busy||S.showRules) return null;
+  const list=[...S.market,...S.hand.p];
+  for(let i=list.length-1;i>=0;i--){
+    const c=list[i], w=CW*c.sc/2, h=CH*c.sc/2;
+    if(Math.abs(x-c.x)<=w && Math.abs(y-(c.y-c.lift))<=h) return c;
+  }
+  return null;
+}
+function herdHit(x,y){
+  const n=S.herd.p.length; if(!n) return false;
+  const w=CW*0.78/2, h=CH*0.78/2;
+  return x>=L.herdP.x-w && x<=L.herdP.x+(n-1)*7+w &&
+         y>=L.herdP.y-(n-1)*3.2-h && y<=L.herdP.y+h;
+}
+function maxGiveCamels(){ return Math.max(0,Math.min(S.herd.p.length, 7-handSize('p'), 5)); }
+
+function onClick(x,y){
+  const b=hitBtn(x,y);
+  if(b){ doButton(b.id); return; }
+  if(S.showRules || S.screen!=='jeu' || S.busy) return;
+
+  if(herdHit(x,y)){
+    const m=maxGiveCamels();
+    if(m>0){ S.sel.camels=(S.sel.camels+1)%(m+1); layout(); }
+    return;
+  }
+  const c=cardAt(x,y); if(!c) return;
+  if(S.market.includes(c)){
+    if(c.type==='chameau'){
+      const camels=S.market.filter(m=>m.type==='chameau');
+      const all=camels.every(m=>S.sel.market.has(m.id));
+      clearSel();
+      if(!all) camels.forEach(m=>S.sel.market.add(m.id));
+    } else {
+      if(S.sel.market.has(c.id)) S.sel.market.delete(c.id);
+      else {
+        if(S.market.some(m=>m.type==='chameau'&&S.sel.market.has(m.id))) S.sel.market.clear();
+        S.sel.market.add(c.id);
+      }
+    }
+  } else {
+    if(S.sel.hand.has(c.id)) S.sel.hand.delete(c.id);
+    else { S.sel.market.clear(); S.sel.camels=0; S.sel.hand.add(c.id); }
+  }
+  layout();
+}
+
+function doButton(id){
+  switch(id){
+    case 'lvl0': S.diff=0; break;
+    case 'lvl1': S.diff=1; break;
+    case 'lvl2': S.diff=2; break;
+    case 'play':   S.showRules=false; newGame(); break;
+    case 'rules':  case 'rulesGame': S.showRules=true; break;
+    case 'closeRules': S.showRules=false; break;
+    case 'next':   nextRound(); break;
+    case 'again':  S.showRules=false; newGame(); break;
+    case 'menu':   S.screen='menu'; break;
+    case 'clear':  clearSel(); layout(); break;
+    case 'pass':   doPlayer(async()=>{ logLine('Vous passez votre tour.'); await wait(200); }); break;
+    case 'take': {
+      const c=S.market.find(m=>S.sel.market.has(m.id));
+      if(c) doPlayer(()=>actTakeOne('p',c));
+      break; }
+    case 'camels': doPlayer(()=>actTakeCamels('p')); break;
+    case 'trade': {
+      const m=S.market.filter(c=>S.sel.market.has(c.id));
+      const h=S.hand.p.filter(c=>S.sel.hand.has(c.id));
+      const cam=S.sel.camels;
+      doPlayer(()=>actTrade('p',m,h,cam));
+      break; }
+    case 'sell': {
+      const h=S.hand.p.filter(c=>S.sel.hand.has(c.id));
+      if(h.length) doPlayer(()=>actSell('p',h[0].type,h.length));
+      break; }
+  }
+}
+
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d');
+
+function toLocal(e){
+  const r=cv.getBoundingClientRect();
+  return {x:(e.clientX-r.left-VIEW.ox)/VIEW.s, y:(e.clientY-r.top-VIEW.oy)/VIEW.s};
+}
+cv.addEventListener('pointermove',e=>{ const p=toLocal(e); POINTER.x=p.x; POINTER.y=p.y; });
+cv.addEventListener('pointerdown',e=>{ const p=toLocal(e); POINTER.x=p.x; POINTER.y=p.y; POINTER.down=true; });
+cv.addEventListener('pointerup',e=>{ const p=toLocal(e); POINTER.down=false; onClick(p.x,p.y); });
+cv.addEventListener('pointerleave',()=>{ POINTER.x=POINTER.y=-9e3; POINTER.down=false; });
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ if(S.showRules) S.showRules=false; }
+  if(e.key==='r'||e.key==='R'){ S.showRules=!S.showRules; }
+});
+
+/* ---------- 18. BOUCLE ---------- */
+function resize(){
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  const vw=window.innerWidth, vh=window.innerHeight;
+  VIEW.s=Math.min(vw/W,vh/H);
+  VIEW.ox=(vw-W*VIEW.s)/2; VIEW.oy=(vh-H*VIEW.s)/2;
+  cv.width=Math.round(vw*dpr); cv.height=Math.round(vh*dpr);
+  cv.style.width=vw+'px'; cv.style.height=vh+'px';
+  VIEW.dpr=dpr; VIEW.vw=vw; VIEW.vh=vh;
+}
+window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',()=>setTimeout(resize,200));
+
+function stepAll(dt){
+  const cards=[...S.deck,...S.discard,...S.market,...S.hand.p,...S.hand.a,...S.herd.p,...S.herd.a];
+  const hov=cardAt(POINTER.x,POINTER.y);
+  for(const c of cards){ c.hotT=(c===hov)?1:0; c.step(dt); }
+  for(const g of GOODS) for(const t of S.tokenV[g]) t.step(dt);
+  for(const k of [3,4,5]) for(const t of S.bonus[k]) t.step(dt);
+  for(const t of S.purse.p) t.step(dt);
+  for(const t of S.purse.a) t.step(dt);
+  stepFx(dt);
+}
+
+let last=0;
+function frame(t){
+  const dt=Math.min(0.045,(t-last)/1000)||1/60; last=t;
+  if(S.screen!=='menu') { layout(); stepAll(dt); }
+  else stepFx(dt);
+
+  ctx.setTransform(VIEW.dpr,0,0,VIEW.dpr,0,0);
+  ctx.fillStyle=C.ink; ctx.fillRect(0,0,VIEW.vw,VIEW.vh);
+  ctx.save(); ctx.translate(VIEW.ox,VIEW.oy); ctx.scale(VIEW.s,VIEW.s);
+  ctx.beginPath(); ctx.rect(0,0,W,H); ctx.clip();
+
+  BTN=[];
+  drawTable();
+  if(S.screen!=='menu'){
+    drawArcade(); drawComptoir(); drawZones(); drawCards(); drawPanel();
+    drawActions(); drawFx();
+    button('rulesGame','Règles',1252,846,96,36,{ghost:true});
+  }
+  if(S.screen==='menu') drawMenu();
+  if(S.screen==='manche') drawRoundEnd();
+  if(S.screen==='fin') drawGameEnd();
+  if(S.showRules) drawRules();
+
+  const hb=hitBtn(POINTER.x,POINTER.y);
+  HOT.btn=hb?hb.id:null;
+  cv.style.cursor = hb || cardAt(POINTER.x,POINTER.y) || (!S.busy&&herdHit(POINTER.x,POINTER.y))
+    ? 'pointer' : 'default';
+
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+
+/* ---------- 19. DEMARRAGE ---------- */
+(async function boot(){
+  resize(); makeJali();
+  try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
+  await loadAssets();
+  /* etat minimal pour que le menu s'affiche */
+  for(const g of GOODS){ S.tokens[g]=TOKEN_SET[g].slice(); S.tokenV[g]=[]; }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
