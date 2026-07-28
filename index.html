@@ -397,8 +397,8 @@ function computeLayout(vw,vh){
     L.topY = 34; L.botY = H-34;
     L.purseA = {x:W-138, y:34, d:26, per:9};
     L.purseP = {x:W-138, y:H-34, d:26, per:9};
-    L.handA = {x:378, y:150};  L.handScA = 0.42;
-    L.herdA = {x:W-98, y:150}; L.herdScA = 0.40;
+    L.handA = {x:372, y:162};  L.handScA = 0.58;
+    L.herdA = {x:W-98, y:162}; L.herdScA = 0.50;
     L.herdDX = 4; L.herdDY = 2.4;
     const cy = 240 + Math.max(0,H-1400)*0.20;
     L.comp = {x:pad, y:cy, d:52, tall:true};
@@ -406,9 +406,9 @@ function computeLayout(vw,vh){
     L.comp.gx = [0,1,2,3,4,5].map(i=>pad+70+i*((W-2*pad)/6));
     L.comp.bx = [W/2-232, W/2-122, W/2-12];
     L.comp.camX = W/2+124; L.comp.camY = cy+112;
-    L.msgY = H-366; L.actY = H-306;
-    L.handP = {x:372, y:H-166}; L.handScP = 0.64; L.fanW = 620;
-    L.herdP = {x:W-104, y:H-166}; L.herdScP = 0.52;
+    L.msgY = H-446; L.actY = H-386;
+    L.handP = {x:372, y:H-212}; L.handScP = 0.90; L.fanW = 650;
+    L.herdP = {x:W-104, y:H-212}; L.herdScP = 0.62;
     L.slotY = Math.round(((cy+302)+(L.msgY-254))/2);
     L.slotX = [0,1,2,3,4].map(i=>pad+CW/2+i*(CW+10));
     L.deck    = {x:pad+58,   y:L.slotY+CH/2+70}; L.deckSc = 0.44;
@@ -420,16 +420,16 @@ function computeLayout(vw,vh){
 function layout(){
   S.deck.forEach((c,i)=>{
     c.tx=L.deck.x-i*0.22; c.ty=L.deck.y-i*0.5;
-    c.trot=c.jit*0.10; c.tsc=L.deckSc; c.tflip=0; c.z=i; c.tlift=0;
+    c.trot=c.jit*0.10; c.tsc=L.deckSc; c.tflip=0; c.ord=i; c.tlift=0;
   });
   S.discard.forEach((c,i)=>{
     c.tx=L.discard.x+c.jit*13; c.ty=L.discard.y-i*0.35+c.jit*10;
-    c.trot=c.jit*2.6; c.tsc=L.discSc; c.tflip=1; c.z=i;
+    c.trot=c.jit*2.6; c.tsc=L.discSc; c.tflip=1; c.ord=i;
   });
   S.market.forEach((c,i)=>{
     const p=L.slot(i), on=S.sel.market.has(c.id);
     c.tx=p.x; c.ty=p.y-(on?16:0); c.trot=0; c.tsc=1; c.tflip=1;
-    c.tglow=on?1:0; c.z=100+i; c.tlift=on?8:0;
+    c.tglow=on?1:0; c.ord=i; c.tlift=on?8:0;
   });
   fanHand(S.hand.p, L.handP, L.handScP, true);
   fanHand(S.hand.a, L.handA, L.handScA, false);
@@ -451,7 +451,7 @@ function fanHand(arr,pos,scale,sel){
     c.tx=pos.x-total/2+i*step;
     c.ty=pos.y + t*t*15*(sel?-1:1) - (on?22:0);
     c.trot=t*0.075; c.tsc=scale; c.tflip=sel?1:0;
-    c.tglow=on?1:0; c.z=200+i; c.tlift=on?10:0;
+    c.tglow=on?1:0; c.ord=i; c.tlift=on?10:0;
   });
 }
 function herdStack(arr,pos,scale,selN){
@@ -459,7 +459,7 @@ function herdStack(arr,pos,scale,selN){
   arr.forEach((c,i)=>{
     const on = selN>0 && i>=n-selN;
     c.tx=pos.x+i*L.herdDX; c.ty=pos.y-i*L.herdDY-(on?24:0);
-    c.trot=c.jit*0.5; c.tsc=scale*0.78; c.tflip=1; c.z=300+i;
+    c.trot=c.jit*0.5; c.tsc=scale*0.78; c.tflip=1; c.ord=i;
     c.tglow=on?1:0; c.tlift=on?8:0;
   });
 }
@@ -1263,7 +1263,7 @@ function drawZones(){
 
 function drawCards(){
   const all=[];
-  const push=(a,b)=>a.forEach((c,i)=>{ c._z=b+i; all.push(c); });
+  const push=(a,b)=>a.forEach((c,i)=>{ c._z=b+(c.ord!==undefined?c.ord:i); all.push(c); });
   push(S.deck,0); push(S.discard,90); push(S.market,300);
   push(S.hand.a,500); push(S.herd.a,700); push(S.hand.p,900); push(S.herd.p,1100);
   for(const c of all) if(c.speed>50||c.lift>2) c._z+=5000;
@@ -1491,9 +1491,12 @@ const HOT={btn:null,card:null};
 function hitBtn(x,y){ for(const b of BTN) if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h) return b; return null; }
 function cardAt(x,y){
   if(S.screen!=='jeu'||S.busy||S.showRules) return null;
-  const list=[...S.market,...S.hand.p];
+  const list=[];
+  S.market.forEach(c=>list.push({c,z:100+(c.ord||0)}));
+  S.hand.p.forEach(c=>list.push({c,z:900+(c.ord||0)}));
+  list.sort((a,b)=>a.z-b.z);                    /* meme ordre qu'au rendu */
   for(let i=list.length-1;i>=0;i--){
-    const c=list[i], w=CW*c.sc/2, h=CH*c.sc/2;
+    const c=list[i].c, w=CW*c.sc/2, h=CH*c.sc/2;
     if(Math.abs(x-c.x)<=w && Math.abs(y-(c.y-c.lift))<=h) return c;
   }
   return null;
