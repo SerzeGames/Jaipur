@@ -352,7 +352,8 @@ const S = {
   endInfo:null, over:null, showRules:false,
   camelTokenTo:null,
   oppMin:[0,0,0,0,0,0],      /* cartes que le joueur a prises ouvertement (borne basse) */
-  diff:2, thinking:false, aiDepth:0, aiNodes:0
+  diff:2, thinking:false, aiDepth:0, aiNodes:0,
+  zoom:1, showZoom:false
 };
 
 /* ---------- 8. GEOMETRIE RESPONSIVE ----------
@@ -364,13 +365,15 @@ let U = 1, TS = 1;
 const u = v => v*U;
 const L = { mode:'wide', slotX:[], slot(i){ return {x:this.slotX[i], y:this.slotY}; } };
 
+const ZMIN=0.85, ZMAX=1.55;
 function computeLayout(vw,vh){
   const ar = vw/vh;
+  const Z = clamp((typeof S!=='undefined'&&S.zoom)||1, ZMIN, ZMAX);
   if(ar >= 1.32){
     /* ================= PAYSAGE (reference 1500 x 900) ================= */
     L.mode='wide';
     H = Math.round(clamp(vh, 540, 1000));
-    U = H/900; TS = U<1 ? Math.max(.9,U) : Math.min(U,1.15);
+    U = H/900; TS = (U<1 ? Math.max(.9,U) : Math.min(U,1.15)) * Z;
     W = Math.round(clamp(H*ar, H*1.30, H*2.40));
     CW = u(118); CH = u(165);
     L.pad = u(30);
@@ -393,14 +396,15 @@ function computeLayout(vw,vh){
     L.comp.by  = u(96)+6*u(46)+u(42);
     L.comp.bx  = [0,1,2].map(i=>u(36)+u(34)+i*u(68));
     L.comp.camX= u(66); L.comp.camY = L.comp.by+u(94);
-    L.msgY = u(252); L.actY = u(566); L.actH = u(46);
+    L.msgY = u(252); L.actY = u(566); L.actH = u(46)*Math.min(Z,1.25);
+    L.sealD = u(34);
     L.arcY = u(518); L.labY = u(538);
     L.topY = u(52);  L.botY = u(838);
   } else {
     /* ================= PORTRAIT (reference 440 de large) ================= */
     L.mode='tall';
     W = Math.round(clamp(vw, 320, 620));
-    U = W/440; TS = U<1 ? Math.max(.85,U) : Math.min(U,1.10);
+    U = W/440; TS = (U<1 ? Math.max(.85,U) : Math.min(U,1.10)) * Z;
     H = Math.round(W/ar);
     const pad=u(8), gapc=u(5); L.pad=pad;
     CW = (W-2*pad-4*gapc)/5; CH = CW*516/369;
@@ -408,26 +412,49 @@ function computeLayout(vw,vh){
 
     /* si l'ecran est trop court (portrait presque carre), on retrecit les cartes
        juste ce qu'il faut pour que la pile verticale tienne */
-    const HB=u(58), hComp=u(80), hMsg=u(32), hAct=u(42), minGap=u(9);
+    /* le zoom mange la place : on cherche le plus grand facteur qui laisse
+       les cartes du marche a une taille encore utilisable (62 % au minimum) */
+    const minGap=u(9), CH0=CH;
+    const kOf=z=>{
+      const a=2*u(58)*z+u(80)*z+u(13)+u(32)*z+u(42)*z;
+      const m=Math.min(0.90,0.62*z)+0.36+1+Math.min(1.02,0.90*z);
+      return (H-8*minGap-a)/(CH0*m);
+    };
+    let zMax=ZMIN;
+    for(let z=ZMAX; z>=ZMIN-1e-9; z-=0.05){ if(kOf(z)>=0.62){ zMax=Math.min(ZMAX,z); break; } }
+    L.zMax=Math.round(zMax*20)/20;
+    const Ze=Math.min(Z,L.zMax);
+    if(typeof S!=='undefined' && S.zoom>L.zMax) S.zoom=L.zMax;
+    TS = (U<1 ? Math.max(.85,U) : Math.min(U,1.10)) * Ze;
+
+    const HB=u(58)*Ze, hComp=u(80)*Ze, hMsg=u(32)*Ze, hAct=u(42)*Ze;
+    const scA=Math.min(0.90,0.62*Ze), scP=Math.min(1.02,0.90*Ze);
+    const scHA=Math.min(0.72,0.50*Ze), scHP=Math.min(0.86,0.62*Ze);
     const A = 2*HB+hComp+u(13)+hMsg+hAct;
-    const k = Math.min(1, (H-8*minGap-A)/(CH*2.88));
-    if(k<1 && k>0.35){ CW*=k; CH*=k; }
+    const k = Math.min(1, kOf(Ze));
+    if(k<1){ CW*=Math.max(0.5,k); CH*=Math.max(0.5,k); }
     const cgap=(W-5*CW)/6;
-    const hAI=CH*0.62, hDeck=CH*0.36+u(13), hMk=CH, hHand=CH*0.90;
+    const hAI=CH*scA, hDeck=CH*0.36+u(13), hMk=CH, hHand=CH*scP;
     const fixed = A+hAI+hDeck+hMk+hHand;
     const gap = clamp((H-fixed)/8, minGap, u(46));
     const extra = Math.max(0, H-fixed-8*gap);
 
-    L.topY=u(22); L.rowY=u(42); L.barH=HB; L.botY=H-u(22); L.rowYb=H-u(42);
-    L.purseA={x:W-u(76), y:u(22), d:u(19), per:8};
-    L.purseP={x:W-u(76), y:H-u(22), d:u(19), per:8};
+    L.topY=HB*0.38; L.rowY=HB*0.72; L.barH=HB; L.botY=H-HB*0.38; L.rowYb=H-HB*0.72;
+    L.sealD=u(20)*Ze;
+    L.purseA={x:W-u(76), y:L.rowY,  d:u(19)*Ze, per:8};
+    L.purseP={x:W-u(76), y:L.rowYb, d:u(19)*Ze, per:8};
+    L.herdSpX=u(24); L.herdSpY=u(12);
+    /* enclos ancres a droite, la main occupe tout le reste */
+    const hwP=CW*scHP*0.78/2, hwA=CW*scHA*0.78/2;
+    const availP=(W-u(6)-L.herdSpX-2*hwP-u(10))-pad;
+    L.fanW=Math.max(u(60),(availP-CW*scP)*7/6);
 
     let y = HB+gap;
-    L.handA={x:W*0.42, y:y+hAI/2}; L.handScA=0.62;
-    L.herdA={x:W-u(56), y:y+hAI/2}; L.herdScA=0.50;
+    L.handA={x:pad+availP/2, y:y+hAI/2}; L.handScA=scA;
+    L.herdA={x:W-u(6)-L.herdSpX-hwA, y:y+hAI/2}; L.herdScA=scHA;
     y += hAI+gap;
-    L.comp={x:pad, y:y, d:u(36), dB:u(32), tall:true, w:W-2*pad};
-    L.comp.gy=y+u(22); L.comp.by=y+u(58);
+    L.comp={x:pad, y:y, d:u(36)*Ze, dB:u(32)*Ze, tall:true, w:W-2*pad};
+    L.comp.gy=y+hComp*0.275; L.comp.by=y+hComp*0.725;
     L.comp.gx=[0,1,2,3,4,5].map(i=>pad+u(18)+i*((W-2*pad)/6));
     L.comp.bx=[u(80),u(116),u(152)];
     L.comp.camX=u(200); L.comp.camY=y+u(58);
@@ -441,10 +468,9 @@ function computeLayout(vw,vh){
     y += hMk+gap+extra/2;
     L.msgY = y+hMsg/2;   y += hMsg+gap;
     L.actY = y; L.actH=hAct; y += hAct+gap;
-    L.handP={x:(pad+W-u(75))/2, y:y+hHand/2}; L.handScP=0.90;
-    L.fanW =W-u(112)-2*pad;
-    L.herdP={x:W-u(56), y:y+hHand/2}; L.herdScP=0.62;
-    L.herdDX=u(2.8); L.herdDY=u(2.0); L.herdSpX=u(24); L.herdSpY=u(12);
+    L.handP={x:pad+availP/2, y:y+hHand/2}; L.handScP=scP;
+    L.herdP={x:W-u(6)-L.herdSpX-hwP, y:y+hHand/2}; L.herdScP=scHP;
+    L.herdDX=u(2.8); L.herdDY=u(2.0);
     L.arcY = 0;
   }
 }
@@ -1099,6 +1125,17 @@ function button(id,label,x,y,w,h,o={}){
   }
   c.restore(); BTN.push({id,x,y,w,h});
 }
+function slider(id,x,y,w,val,min,max){
+  const t=clamp((val-min)/(max-min),0,1), kx=x+t*w, r=u(11);
+  const act = HOT.btn===id || (DRAG&&DRAG.id===id);
+  const c=ctx; c.save(); c.lineCap='round'; c.lineWidth=u(5);
+  c.strokeStyle='rgba(231,215,180,.18)';
+  c.beginPath(); c.moveTo(x,y); c.lineTo(x+w,y); c.stroke();
+  c.strokeStyle=C.gold; c.beginPath(); c.moveTo(x,y); c.lineTo(kx,y); c.stroke();
+  c.beginPath(); c.arc(kx,y,r,0,7); c.fillStyle=act?C.goldLt:C.gold; c.fill();
+  c.lineWidth=1.5; c.strokeStyle='rgba(0,0,0,.4)'; c.stroke(); c.restore();
+  BTN.push({id,x:x-r*2,y:y-u(20),w:w+r*4,h:u(40),sl:{x,w,min,max}});
+}
 function circleButton(id,label,cx,cy,r){
   const hot=HOT.btn===id, c=ctx;
   c.save(); c.beginPath(); c.arc(cx,cy,r,0,7);
@@ -1216,7 +1253,7 @@ function drawPanel(){                       /* paysage : panneau lateral */
 
   txt('ORDINATEUR',px,u(100),{size:17,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:2});
   if(S.turn==='a'&&S.screen==='jeu') dot(px-u(12),u(100));
-  drawSeals('a',px+u(8),u(130),u(34));
+  drawSeals('a',px+u(8),u(130),L.sealD);
   txt(purseTotal('a')+(hiddenTok('a')?' + ?':'')+' roupies',pr,u(100),
       {size:19,align:'right',color:C.goldLt,weight:700});
   txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux',pr,u(130),
@@ -1234,33 +1271,37 @@ function drawPanel(){                       /* paysage : panneau lateral */
 
   txt('VOUS',px,u(600),{size:17,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:2});
   if(S.turn==='p'&&S.screen==='jeu') dot(px-u(12),u(600));
-  drawSeals('p',px+u(8),u(630),u(34));
+  drawSeals('p',px+u(8),u(630),L.sealD);
   txt(purseTotal('p')+' roupies',pr,u(600),{size:19,align:'right',color:C.goldLt,weight:700});
   txt(S.hand.p.length+'/7 cartes · '+S.herd.p.length+' chameaux',pr,u(630),
       {size:14,align:'right',color:C.dim,weight:500});
   for(const t of S.purse.p) t.draw(true);
   button('rulesGame','Règles',px,u(846),u(96),u(36),{ghost:true});
+  button('zoom','Affichage',px+u(108),u(846),u(112),u(36),{ghost:true});
 }
 
+function barRow(who,name,y,rup){
+  let x=L.pad+u(4);
+  txt(name,x,y,{size:14,color:S.turn===who?C.goldLt:C.txt,weight:700,ls:1.5});
+  if(S.turn===who&&S.screen==='jeu') dot(L.pad-u(3),y);
+  x += measure(name,14,700,1.5)+u(10);
+  drawSeals(who,x+L.sealD/2,y,L.sealD);
+  x += L.sealD*1.94+u(8);
+  txt(rup,x,y,{size:14,color:C.goldLt,weight:700});
+}
 function drawBars(){                        /* portrait : bandeaux haut et bas */
   const x0=L.pad+u(4);
-  txt('ORDINATEUR',x0,L.topY,{size:14,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:1.5});
-  if(S.turn==='a'&&S.screen==='jeu') dot(L.pad-u(3),L.topY);
-  drawSeals('a',x0+u(112),L.topY,u(20));
-  txt(purseTotal('a')+(hiddenTok('a')?'+?':'')+' r.',x0+u(152),L.topY,
-      {size:14,color:C.goldLt,weight:700});
-  txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux · '+AI_LEVELS[S.diff].name+
+  barRow('a','ORDINATEUR',L.topY,purseTotal('a')+(hiddenTok('a')?'+?':'')+' r.');
+  txt(S.hand.a.length+' c. · '+S.herd.a.length+' ch. · '+AI_LEVELS[S.diff].name+
       (S.aiDepth?' ('+S.aiDepth+')':''), x0,L.rowY,{size:11,color:C.dim,weight:500});
   for(const t of S.purse.a) t.draw(true);
 
-  txt('VOUS',x0,L.botY,{size:14,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:1.5});
-  if(S.turn==='p'&&S.screen==='jeu') dot(L.pad-u(3),L.botY);
-  drawSeals('p',x0+u(112),L.botY,u(20));
-  txt(purseTotal('p')+' r.',x0+u(152),L.botY,{size:14,color:C.goldLt,weight:700});
-  txt('MANCHE '+S.round+' · '+S.hand.p.length+'/7 cartes · '+S.herd.p.length+' chameaux',
+  barRow('p','VOUS',L.botY,purseTotal('p')+' r.');
+  txt('MANCHE '+S.round+' · '+S.hand.p.length+'/7 c. · '+S.herd.p.length+' ch.',
       x0,L.rowYb,{size:11,color:C.dim,weight:500});
   for(const t of S.purse.p) t.draw(true);
   circleButton('rulesGame','?',W-u(20),u(20),u(13));
+  circleButton('zoom','A',W-u(50),u(20),u(13));
 }
 
 function drawZones(){
@@ -1379,26 +1420,49 @@ function para(lines,x,y,maxW,size,lh,o={}){
 function drawMenu(){
   shade(.55);
   const tall=L.mode==='tall';
-  const b=box(u(tall?600:640),u(tall?700:646)), cx=b.cx;
-  chhatri(cx,b.y+u(88),u(66));
-  txt('JAIPUR',cx,b.y+u(158),{size:tall?52:62,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
-  txt('DUEL DE MARCHANDS AU BAZAR',cx,b.y+u(196),{size:tall?12:15,align:'center',color:C.gold,weight:600,ls:3});
+  const HD=u(tall?764:706);
+  const b=box(u(tall?600:640),HD), cx=b.cx, q=b.h/HD;
+  const Y=v=>b.y+q*u(v);
+  chhatri(cx,Y(88),u(66)*q);
+  txt('JAIPUR',cx,Y(158),{size:(tall?52:62)*q,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  txt('DUEL DE MARCHANDS AU BAZAR',cx,Y(196),{size:tall?12:15,align:'center',color:C.gold,weight:600,ls:3});
   para(['Deux marchands, un marché de cinq cartes.',
         'À chaque tour : prendre des cartes, ou vendre — jamais les deux.',
         'Le plus riche en fin de manche emporte un Sceau d\'Excellence.'],
-       cx,b.y+u(240),b.w-u(70),tall?14:17,u(26),{align:'center',color:C.txt,alpha:.85});
-  txt('ADVERSAIRE',cx,b.y+u(tall?400:368),{size:11,align:'center',color:C.dim,weight:700,ls:3});
+       cx,Y(240),b.w-u(70),tall?14:17,q*u(26),{align:'center',color:C.txt,alpha:.85});
+  txt('ADVERSAIRE',cx,Y(tall?400:368),{size:11,align:'center',color:C.dim,weight:700,ls:3});
   const bw=Math.min(u(180),(b.w-u(60))/3), bg=u(10);
-  AI_LEVELS.forEach((lv,i)=>button('lvl'+i,lv.name,cx-1.5*bw-bg+i*(bw+bg),b.y+u(tall?416:384),bw,u(40),
+  AI_LEVELS.forEach((lv,i)=>button('lvl'+i,lv.name,cx-1.5*bw-bg+i*(bw+bg),Y(tall?416:384),bw,q*u(40),
     {ghost:true,active:S.diff===i}));
   para([['prend ses décisions vite et sans calcul',
          'anticipe quelques coups à l\'avance',
          'explore l\'arbre des coups et suit vos prises'][S.diff]],
-       cx,b.y+u(tall?486:450),b.w-u(70),tall?12:14,u(20),{align:'center',color:C.dim,weight:500});
-  button('play','Commencer la partie',cx-u(150),b.y+u(tall?522:482),u(300),u(50));
-  button('rules','Voir les règles',cx-u(150),b.y+u(tall?586:550),u(300),u(42),{ghost:true});
-  txt('Sébastien Pauchon · Alexandre Roche · GameWorks',cx,b.y+b.h-u(26),
+       cx,Y(tall?488:452),b.w-u(70),tall?12:14,q*u(20),{align:'center',color:C.dim,weight:500});
+  txt('TAILLE DE L\'AFFICHAGE',cx-u(150),Y(tall?524:488),{size:11,color:C.dim,weight:700,ls:3});
+  txt(Math.round(S.zoom*100)+' %',cx+u(150),Y(tall?524:488),
+      {size:12,align:'right',color:C.goldLt,weight:700});
+  slider('zoomSl',cx-u(150),Y(tall?550:514),u(300),S.zoom,ZMIN,ZMAX);
+  button('play','Commencer la partie',cx-u(150),Y(tall?584:548),u(300),q*u(50));
+  button('rules','Voir les règles',cx-u(150),Y(tall?650:614),u(300),q*u(42),{ghost:true});
+  txt('Sébastien Pauchon · Alexandre Roche · GameWorks',cx,b.y+b.h-u(24),
       {size:11,align:'center',color:C.dim,weight:500});
+}
+
+/* ---------- reglage de l'affichage, accessible en cours de partie ---------- */
+function drawZoomPanel(){
+  shade(.82);
+  const b=box(u(560),u(400)), cx=b.cx;
+  txt('AFFICHAGE',cx,b.y+u(52),{size:26,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  para(['Agrandit textes, jetons et mains. Au-delà d\'un certain point, les cartes du marché se réduisent pour laisser la place.'],
+       cx,b.y+u(102),b.w-u(70),12,u(20),{align:'center',color:C.dim,weight:500});
+  txt('TAILLE',b.x+u(40),b.y+u(184),{size:11,color:C.dim,weight:700,ls:3});
+  txt(Math.round(S.zoom*100)+' %',b.x+b.w-u(40),b.y+u(184),
+      {size:15,align:'right',color:C.goldLt,weight:700});
+  slider('zoomSl',b.x+u(40),b.y+u(216),b.w-u(80),S.zoom,ZMIN,ZMAX);
+  txt('Aperçu : 12 cuirs · 48 roupies',cx,b.y+u(266),
+      {size:14,align:'center',color:C.txt,alpha:.85,weight:500});
+  button('zoomReset','100 %',cx-u(160),b.y+u(300),u(150),u(42),{ghost:true});
+  button('closeZoom','Fermer',cx+u(10),b.y+u(300),u(150),u(42));
 }
 
 const RULES=[
@@ -1538,7 +1602,7 @@ const HOT={btn:null,card:null};
 
 function hitBtn(x,y){ for(const b of BTN) if(x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h) return b; return null; }
 function cardAt(x,y){
-  if(S.screen!=='jeu'||S.busy||S.showRules) return null;
+  if(S.screen!=='jeu'||S.busy||S.showRules||S.showZoom) return null;
   const list=[];
   S.market.forEach(c=>list.push({c,z:100+(c.ord||0)}));
   S.hand.p.forEach(c=>list.push({c,z:900+(c.ord||0)}));
@@ -1561,7 +1625,7 @@ function maxGiveCamels(){ return Math.max(0,Math.min(S.herd.p.length, 7-handSize
 function onClick(x,y){
   const b=hitBtn(x,y);
   if(b){ doButton(b.id); return; }
-  if(S.showRules || S.screen!=='jeu' || S.busy) return;
+  if(S.showRules || S.showZoom || S.screen!=='jeu' || S.busy) return;
 
   if(herdHit(x,y)){
     const m=maxGiveCamels();
@@ -1595,7 +1659,10 @@ function doButton(id){
     case 'lvl1': S.diff=1; break;
     case 'lvl2': S.diff=2; break;
     case 'play':   S.showRules=false; newGame(); break;
-    case 'rules':  case 'rulesGame': S.showRules=true; break;
+    case 'rules':  case 'rulesGame': S.showRules=true; S.showZoom=false; break;
+    case 'zoom':   S.showZoom=true; S.showRules=false; break;
+    case 'closeZoom': S.showZoom=false; saveZoom(); break;
+    case 'zoomReset': S.zoom=1; resize(); saveZoom(); break;
     case 'closeRules': S.showRules=false; break;
     case 'next':   nextRound(); break;
     case 'again':  S.showRules=false; newGame(); break;
@@ -1627,16 +1694,33 @@ function toLocal(e){
   const r=cv.getBoundingClientRect();
   return {x:(e.clientX-r.left-VIEW.ox)/VIEW.s, y:(e.clientY-r.top-VIEW.oy)/VIEW.s};
 }
-cv.addEventListener('pointermove',e=>{ const p=toLocal(e); POINTER.x=p.x; POINTER.y=p.y; });
-cv.addEventListener('pointerdown',e=>{ const p=toLocal(e); POINTER.x=p.x; POINTER.y=p.y; POINTER.down=true; });
+let DRAG=null;
+function applySlider(b,x){
+  const t=clamp((x-b.sl.x)/b.sl.w,0,1);
+  let v=Math.round((b.sl.min+t*(b.sl.max-b.sl.min))*20)/20;
+  if(L.mode==='tall'&&L.zMax) v=Math.min(v,L.zMax);
+  if(v!==S.zoom){ S.zoom=v; resize(); }
+}
+function saveZoom(){ try{ localStorage.setItem('jaipur.zoom',String(S.zoom)); }catch(e){} }
+cv.addEventListener('pointermove',e=>{
+  const p=toLocal(e); POINTER.x=p.x; POINTER.y=p.y;
+  if(DRAG) applySlider(DRAG,p.x);
+});
+cv.addEventListener('pointerdown',e=>{
+  const p=toLocal(e); POINTER.x=p.x; POINTER.y=p.y; POINTER.down=true;
+  const b=hitBtn(p.x,p.y);
+  if(b&&b.sl){ DRAG=b; applySlider(b,p.x); }
+});
 cv.addEventListener('pointerup',e=>{
-  const p=toLocal(e); POINTER.down=false; onClick(p.x,p.y);
+  const p=toLocal(e); POINTER.down=false;
+  if(DRAG){ DRAG=null; saveZoom(); if(e.pointerType==='touch'){POINTER.x=POINTER.y=-9e3;HOT.btn=null;} return; }
+  onClick(p.x,p.y);
   if(e.pointerType==='touch'){ POINTER.x=POINTER.y=-9e3; HOT.btn=null; }   /* pas de survol au doigt */
 });
-cv.addEventListener('pointercancel',()=>{ POINTER.down=false; POINTER.x=POINTER.y=-9e3; });
+cv.addEventListener('pointercancel',()=>{ DRAG=null; POINTER.down=false; POINTER.x=POINTER.y=-9e3; });
 cv.addEventListener('pointerleave',()=>{ POINTER.x=POINTER.y=-9e3; POINTER.down=false; });
 window.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){ if(S.showRules) S.showRules=false; }
+  if(e.key==='Escape'){ S.showRules=false; if(S.showZoom){S.showZoom=false;saveZoom();} }
   if(e.key==='r'||e.key==='R'){ S.showRules=!S.showRules; }
 });
 
@@ -1687,6 +1771,7 @@ function frame(t){
   if(S.screen==='manche') drawRoundEnd();
   if(S.screen==='fin') drawGameEnd();
   if(S.showRules) drawRules();
+  if(S.showZoom) drawZoomPanel();
 
   const hb=hitBtn(POINTER.x,POINTER.y);
   HOT.btn=hb?hb.id:null;
@@ -1699,6 +1784,8 @@ function frame(t){
 
 /* ---------- 19. DEMARRAGE ---------- */
 (async function boot(){
+  try{ const z=parseFloat(localStorage.getItem('jaipur.zoom'));
+       if(z>=ZMIN&&z<=ZMAX) S.zoom=z; }catch(e){}
   resize(); makeJali();
   try{ if(document.fonts && document.fonts.ready) await document.fonts.ready; }catch(e){}
   await loadAssets();
