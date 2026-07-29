@@ -84,6 +84,7 @@ function rr(x,y,w,h,r){
 }
 function txt(s,x,y,{size=16,font='Barlow Semi Condensed',weight=500,color=C.txt,
    align='left',baseline='middle',ls=0,alpha=1}={}){
+  size=Math.max(9,size*TS);
   ctx.save(); ctx.globalAlpha*=alpha; ctx.fillStyle=color;
   ctx.font=`${weight} ${size}px "${font}", sans-serif`;
   ctx.textAlign=ls?'left':align; ctx.textBaseline=baseline;
@@ -95,6 +96,7 @@ function txt(s,x,y,{size=16,font='Barlow Semi Condensed',weight=500,color=C.txt,
   ctx.restore();
 }
 function measure(s,size,weight=500,ls=0){
+  size=Math.max(9,size*TS);
   ctx.save(); ctx.font=`${weight} ${size}px "Barlow Semi Condensed", sans-serif`;
   let w; if(ls){w=0;for(const ch of s)w+=ctx.measureText(ch).width+ls; w-=ls;}
   else w=ctx.measureText(s).width; ctx.restore(); return w;
@@ -198,7 +200,7 @@ class VCard{
     const fly=clamp(this.speed/650,0,1)+this.lift/60;
     c.save();
     c.shadowColor=`rgba(0,0,0,${(0.42+fly*0.24).toFixed(2)})`;
-    c.shadowBlur=9+fly*24; c.shadowOffsetY=5+fly*13;
+    c.shadowBlur=(9+fly*24)*U; c.shadowOffsetY=(5+fly*13)*U;
     c.fillStyle='#0a0a0a'; rr(-w/2,-h/2,w,h,10*this.sc); c.fill();
     c.restore();
     c.scale(Math.max(.02,sx),1);
@@ -246,7 +248,7 @@ class VTok{
   draw(showVal=true){
     const c=ctx; c.save(); c.translate(this.x,this.y); c.rotate(this.rot);
     const d=this.d*(1+this.pop*.18);
-    c.save(); c.shadowColor='rgba(0,0,0,.45)'; c.shadowBlur=6; c.shadowOffsetY=3;
+    c.save(); c.shadowColor='rgba(0,0,0,.45)'; c.shadowBlur=6*U; c.shadowOffsetY=3*U;
     c.beginPath(); c.arc(0,0,d/2,0,7); c.fillStyle='#0a0a0a'; c.fill(); c.restore();
     drawTokenSprite(this.src(),0,0,d);
     if(showVal && !this.hidden && (this.kind==='good'||this.kind==='bonus')) valueBadge(0,0,this.val,d);
@@ -258,20 +260,20 @@ class VTok{
 /* particules / textes flottants */
 const fx=[];
 function floatText(s,x,y,color=C.goldLt,size=30){
-  fx.push({t:'txt',s,x,y,vy:-46,life:1.35,age:0,color,size});
+  fx.push({t:'txt',s,x,y,vy:-46*U,life:1.35,age:0,color,size});
 }
 function burst(x,y,n=16,color=C.goldLt){
   for(let i=0;i<n;i++){
-    const a=rnd(0,6.283), sp=rnd(70,300);
-    fx.push({t:'p',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-70,life:rnd(.5,1.1),age:0,
-             color,r:rnd(1.6,4.2)});
+    const a=rnd(0,6.283), sp=rnd(70,300)*U;
+    fx.push({t:'p',x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-70*U,life:rnd(.5,1.1),age:0,
+             color,r:rnd(1.6,4.2)*U});
   }
 }
 function stepFx(dt){
   for(let i=fx.length-1;i>=0;i--){
     const p=fx[i]; p.age+=dt;
     if(p.age>=p.life){ fx.splice(i,1); continue; }
-    if(p.t==='p'){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=520*dt; p.vx*=(1-1.6*dt); }
+    if(p.t==='p'){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=520*U*dt; p.vx*=(1-1.6*dt); }
     else { p.y+=p.vy*dt; p.vy*=(1-1.1*dt); }
   }
 }
@@ -354,82 +356,112 @@ const S = {
 };
 
 /* ---------- 8. GEOMETRIE RESPONSIVE ----------
-   Deux dispositions : 'wide' (paysage, panneaux lateraux)
-   et 'tall' (portrait, bandeaux haut/bas). Tout se calcule
-   dans computeLayout(), appele a chaque redimensionnement.   */
+   La scene est dessinee a la taille reelle du viewport (en pixels CSS),
+   pour que les textes gardent une taille lisible sur telephone.
+   U = unite de mise en page (1 = disposition de reference),
+   TS = echelle des textes. Deux modes : 'wide' et 'tall'.        */
+let U = 1, TS = 1;
+const u = v => v*U;
 const L = { mode:'wide', slotX:[], slot(i){ return {x:this.slotX[i], y:this.slotY}; } };
 
 function computeLayout(vw,vh){
   const ar = vw/vh;
   if(ar >= 1.32){
-    /* ---- paysage ---- */
+    /* ================= PAYSAGE (reference 1500 x 900) ================= */
     L.mode='wide';
-    H = 900; W = clamp(Math.round(900*ar), 1360, 2100);
-    CW = 118; CH = 165;
-    L.centerL = 300; L.panelW = 240; L.panelX = W-264; L.centerR = L.panelX-32;
+    H = Math.round(clamp(vh, 540, 1000));
+    U = H/900; TS = U<1 ? Math.max(.9,U) : Math.min(U,1.15);
+    W = Math.round(clamp(H*ar, H*1.30, H*2.40));
+    CW = u(118); CH = u(165);
+    L.pad = u(30);
+    L.panelW = u(240); L.panelX = W-u(264); L.centerL = u(300); L.centerR = L.panelX-u(32);
     const cx = Math.round((L.centerL+L.centerR)/2); L.cx = cx;
-    L.slotY = 404;
-    L.slotX = [0,1,2,3,4].map(i=>cx-268+i*134);
-    L.deck    = {x:cx-396, y:404}; L.deckSc = 0.94;
-    L.discard = {x:cx+398, y:404}; L.discSc = 0.74;
-    L.handA = {x:cx-30, y:132};  L.handScA = 0.72;
-    L.handP = {x:cx-30, y:742};  L.handScP = 1;
-    L.fanW  = L.centerR-L.centerL-330;
-    L.herdA = {x:L.centerR-104, y:132}; L.herdScA = 0.72;
-    L.herdP = {x:L.centerR-104, y:742}; L.herdScP = 1;
-    L.herdDX = 7; L.herdDY = 3.2;
-    L.purseA = {x:L.panelX+66, y:210, d:32, per:7};
-    L.purseP = {x:L.panelX+66, y:700, d:32, per:7};
-    L.comp = {x:36, y:96, rowH:46, d:40, spread:200};
-    L.comp.gy  = [0,1,2,3,4,5].map(i=>L.comp.y+i*46+22);
-    L.comp.by  = L.comp.y+6*46+42;
-    L.comp.bx  = [0,1,2].map(i=>L.comp.x+34+i*68);
-    L.comp.camY= L.comp.by+94; L.comp.camX = L.comp.x+30;
-    L.msgY = 252; L.actY = 566; L.arcY = 518; L.labY = 538;
-    L.topY = 52;  L.botY = 838;
+    L.slotY = u(404);
+    L.slotX = [0,1,2,3,4].map(i=>Math.round(cx-u(268)+i*u(134)));
+    L.deck    = {x:cx-u(396), y:L.slotY}; L.deckSc = 0.94;
+    L.discard = {x:cx+u(398), y:L.slotY}; L.discSc = 0.74;
+    L.handA = {x:cx-u(30), y:u(132)};  L.handScA = 0.72;
+    L.handP = {x:cx-u(30), y:u(742)};  L.handScP = 1;
+    L.fanW  = L.centerR-L.centerL-u(330);
+    L.herdA = {x:L.centerR-u(104), y:u(132)}; L.herdScA = 0.72;
+    L.herdP = {x:L.centerR-u(104), y:u(742)}; L.herdScP = 1;
+    L.herdDX = u(7); L.herdDY = u(3.2); L.herdSpX = u(70); L.herdSpY = u(32);
+    L.purseA = {x:L.panelX+u(66), y:u(210), d:u(32), per:7};
+    L.purseP = {x:L.panelX+u(66), y:u(700), d:u(32), per:7};
+    L.comp = {x:u(36), y:u(96), d:u(40), spread:u(200), w:u(250)};
+    L.comp.gy  = [0,1,2,3,4,5].map(i=>u(96)+i*u(46)+u(22));
+    L.comp.by  = u(96)+6*u(46)+u(42);
+    L.comp.bx  = [0,1,2].map(i=>u(36)+u(34)+i*u(68));
+    L.comp.camX= u(66); L.comp.camY = L.comp.by+u(94);
+    L.msgY = u(252); L.actY = u(566); L.actH = u(46);
+    L.arcY = u(518); L.labY = u(538);
+    L.topY = u(52);  L.botY = u(838);
   } else {
-    /* ---- portrait ---- */
+    /* ================= PORTRAIT (reference 440 de large) ================= */
     L.mode='tall';
-    W = 880; H = clamp(Math.round(880/ar), 1350, 2000);
-    CW = 160; CH = 224;
-    const pad=18; L.pad=pad;
-    L.centerL = 0; L.centerR = W; L.cx = W/2;
-    L.topY = 34; L.botY = H-34;
-    L.purseA = {x:W-138, y:34, d:26, per:9};
-    L.purseP = {x:W-138, y:H-34, d:26, per:9};
-    L.handA = {x:372, y:162};  L.handScA = 0.58;
-    L.herdA = {x:W-98, y:162}; L.herdScA = 0.50;
-    L.herdDX = 4; L.herdDY = 2.4;
-    const cy = 240 + Math.max(0,H-1400)*0.20;
-    L.comp = {x:pad, y:cy, d:52, tall:true};
-    L.comp.gy = cy+30; L.comp.by = cy+112;
-    L.comp.gx = [0,1,2,3,4,5].map(i=>pad+70+i*((W-2*pad)/6));
-    L.comp.bx = [W/2-232, W/2-122, W/2-12];
-    L.comp.camX = W/2+124; L.comp.camY = cy+112;
-    L.msgY = H-446; L.actY = H-386;
-    L.handP = {x:372, y:H-212}; L.handScP = 0.90; L.fanW = 650;
-    L.herdP = {x:W-104, y:H-212}; L.herdScP = 0.62;
-    L.slotY = Math.round(((cy+302)+(L.msgY-254))/2);
-    L.slotX = [0,1,2,3,4].map(i=>pad+CW/2+i*(CW+10));
-    L.deck    = {x:pad+58,   y:L.slotY+CH/2+70}; L.deckSc = 0.44;
-    L.discard = {x:W-pad-58, y:L.slotY+CH/2+70}; L.discSc = 0.40;
-    L.arcY = 0; L.labY = L.slotY-CH/2-56;
+    W = Math.round(clamp(vw, 320, 620));
+    U = W/440; TS = U<1 ? Math.max(.85,U) : Math.min(U,1.10);
+    H = Math.round(W/ar);
+    const pad=u(8), gapc=u(5); L.pad=pad;
+    CW = (W-2*pad-4*gapc)/5; CH = CW*516/369;
+    L.centerL=0; L.centerR=W; L.cx=W/2;
+
+    /* si l'ecran est trop court (portrait presque carre), on retrecit les cartes
+       juste ce qu'il faut pour que la pile verticale tienne */
+    const HB=u(58), hComp=u(70), hMsg=u(32), hAct=u(42), minGap=u(9);
+    const A = 2*HB+hComp+u(13)+hMsg+hAct;
+    const k = Math.min(1, (H-8*minGap-A)/(CH*2.70));
+    if(k<1 && k>0.35){ CW*=k; CH*=k; }
+    const cgap=(W-5*CW)/6;
+    const hAI=CH*0.44, hDeck=CH*0.36+u(13), hMk=CH, hHand=CH*0.90;
+    const fixed = A+hAI+hDeck+hMk+hHand;
+    const gap = clamp((H-fixed)/8, minGap, u(46));
+    const extra = Math.max(0, H-fixed-8*gap);
+
+    L.topY=u(22); L.rowY=u(42); L.barH=HB; L.botY=H-u(22); L.rowYb=H-u(42);
+    L.purseA={x:W-u(76), y:u(22), d:u(19), per:8};
+    L.purseP={x:W-u(76), y:H-u(22), d:u(19), per:8};
+
+    let y = HB+gap;
+    L.handA={x:W*0.42, y:y+hAI/2}; L.handScA=0.44;
+    L.herdA={x:W-u(56), y:y+hAI/2}; L.herdScA=0.40;
+    y += hAI+gap;
+    L.comp={x:pad, y:y, d:u(27), tall:true, w:W-2*pad};
+    L.comp.gy=y+u(19); L.comp.by=y+u(51);
+    L.comp.gx=[0,1,2,3,4,5].map(i=>pad+u(16)+i*((W-2*pad)/6));
+    L.comp.bx=[u(84),u(112),u(140)];
+    L.comp.camX=u(190); L.comp.camY=y+u(51);
+    y += hComp+gap+extra/2;
+    L.deck   ={x:W*0.22, y:y+CH*0.18}; L.deckSc=0.36;
+    L.discard={x:W*0.78, y:y+CH*0.18}; L.discSc=0.32;
+    L.labY   = y+CH*0.18;
+    y += hDeck+gap;
+    L.slotY = y+hMk/2;
+    L.slotX = [0,1,2,3,4].map(i=>W/2-2*(CW+cgap)+i*(CW+cgap));
+    y += hMk+gap+extra/2;
+    L.msgY = y+hMsg/2;   y += hMsg+gap;
+    L.actY = y; L.actH=hAct; y += hAct+gap;
+    L.handP={x:(pad+W-u(75))/2, y:y+hHand/2}; L.handScP=0.90;
+    L.fanW =W-u(112)-2*pad;
+    L.herdP={x:W-u(56), y:y+hHand/2}; L.herdScP=0.62;
+    L.herdDX=u(2.8); L.herdDY=u(2.0); L.herdSpX=u(24); L.herdSpY=u(12);
+    L.arcY = 0;
   }
 }
 
 function layout(){
   S.deck.forEach((c,i)=>{
-    c.tx=L.deck.x-i*0.22; c.ty=L.deck.y-i*0.5;
+    c.tx=L.deck.x-i*0.22*U; c.ty=L.deck.y-i*0.5*U;
     c.trot=c.jit*0.10; c.tsc=L.deckSc; c.tflip=0; c.ord=i; c.tlift=0;
   });
   S.discard.forEach((c,i)=>{
-    c.tx=L.discard.x+c.jit*13; c.ty=L.discard.y-i*0.35+c.jit*10;
+    c.tx=L.discard.x+c.jit*u(13); c.ty=L.discard.y-i*0.35*U+c.jit*u(10);
     c.trot=c.jit*2.6; c.tsc=L.discSc; c.tflip=1; c.ord=i;
   });
   S.market.forEach((c,i)=>{
     const p=L.slot(i), on=S.sel.market.has(c.id);
-    c.tx=p.x; c.ty=p.y-(on?16:0); c.trot=0; c.tsc=1; c.tflip=1;
-    c.tglow=on?1:0; c.ord=i; c.tlift=on?8:0;
+    c.tx=p.x; c.ty=p.y-(on?u(16):0); c.trot=0; c.tsc=1; c.tflip=1;
+    c.tglow=on?1:0; c.ord=i; c.tlift=on?u(8):0;
   });
   fanHand(S.hand.p, L.handP, L.handScP, true);
   fanHand(S.hand.a, L.handA, L.handScA, false);
@@ -441,33 +473,36 @@ function layout(){
 }
 function fanHand(arr,pos,scale,sel){
   const n=arr.length; if(!n) return;
-  const step=Math.min(CW*scale+12, L.fanW/Math.max(n,1));
+  const step=Math.min(CW*scale+u(12), L.fanW/Math.max(n,1));
   const total=(n-1)*step;
-  /* la main du joueur se range par famille (ordre du comptoir), puis par ancienneté */
+  /* la main du joueur se range par famille (ordre du comptoir), puis par anciennete */
   const list = sel ? arr.slice().sort((x,y)=>(GI[x.type]-GI[y.type])||(x.id-y.id)) : arr;
   list.forEach((c,i)=>{
     const on = sel && S.sel.hand.has(c.id);
     const t = n>1 ? i/(n-1)-0.5 : 0;
     c.tx=pos.x-total/2+i*step;
-    c.ty=pos.y + t*t*15*(sel?-1:1) - (on?22:0);
+    c.ty=pos.y + t*t*u(15)*(sel?-1:1) - (on?u(22):0);
     c.trot=t*0.075; c.tsc=scale; c.tflip=sel?1:0;
-    c.tglow=on?1:0; c.ord=i; c.tlift=on?10:0;
+    c.tglow=on?1:0; c.ord=i; c.tlift=on?u(10):0;
   });
 }
 function herdStack(arr,pos,scale,selN){
   const n=arr.length;
+  const dx = n>1 ? Math.min(L.herdDX, L.herdSpX/(n-1)) : 0;
+  const dy = n>1 ? Math.min(L.herdDY, L.herdSpY/(n-1)) : 0;
+  if(selN!==undefined && arr===S.herd.p){ L.hdxP=dx; L.hdyP=dy; }
   arr.forEach((c,i)=>{
     const on = selN>0 && i>=n-selN;
-    c.tx=pos.x+i*L.herdDX; c.ty=pos.y-i*L.herdDY-(on?24:0);
+    c.tx=pos.x+i*dx; c.ty=pos.y-i*dy-(on?u(24):0);
     c.trot=c.jit*0.5; c.tsc=scale*0.78; c.tflip=1; c.ord=i;
-    c.tglow=on?1:0; c.tlift=on?8:0;
+    c.tglow=on?1:0; c.tlift=on?u(8):0;
   });
 }
 function purseStack(arr,pos){
-  const gap=pos.d*0.53;
+  const g=pos.d*0.53;
   arr.forEach((t,i)=>{
     const col=i%pos.per, row=(i/pos.per)|0;
-    t.tx=pos.x+col*gap-((pos.per-1)*gap)/2; t.ty=pos.y+row*gap; t.td=pos.d; t.trot=0;
+    t.tx=pos.x+col*g-((pos.per-1)*g)/2; t.ty=pos.y+row*g; t.td=pos.d; t.trot=0;
   });
 }
 function layoutComptoir(){
@@ -475,20 +510,20 @@ function layoutComptoir(){
   if(c.tall){
     GOODS.forEach((g,gi)=>{
       const arr=S.tokenV[g], n=arr.length;
-      arr.forEach((t,i)=>{ t.tx=c.gx[gi]-(n-1-i)*2; t.ty=c.gy-(n-1-i)*1.6;
-                           t.td=(i===n-1)?c.d:c.d-6; });
+      arr.forEach((t,i)=>{ t.tx=c.gx[gi]-(n-1-i)*U; t.ty=c.gy-(n-1-i)*0.8*U;
+                           t.td=(i===n-1)?c.d:c.d-u(4); });
     });
     [3,4,5].forEach((k,i)=>S.bonus[k].forEach((t,j)=>{
-      t.tx=c.bx[i]; t.ty=c.by-j*0.7; t.td=46; }));
+      t.tx=c.bx[i]; t.ty=c.by-j*0.5*U; t.td=u(24); }));
   } else {
     GOODS.forEach((g,gi)=>{
       const arr=S.tokenV[g], n=arr.length;
-      const step=n>1?Math.min(21,(c.spread-c.d)/(n-1)):0;
-      arr.forEach((t,i)=>{ t.tx=c.x+30+i*step; t.ty=c.gy[gi];
-                           t.td=(i===n-1)?46:c.d; });
+      const step=n>1?Math.min(u(21),(c.spread-c.d)/(n-1)):0;
+      arr.forEach((t,i)=>{ t.tx=c.x+u(30)+i*step; t.ty=c.gy[gi];
+                           t.td=(i===n-1)?u(46):c.d; });
     });
     [3,4,5].forEach((k,i)=>S.bonus[k].forEach((t,j)=>{
-      t.tx=c.bx[i]; t.ty=c.by-j*0.7; t.td=46; }));
+      t.tx=c.bx[i]; t.ty=c.by-j*0.7*U; t.td=u(46); }));
   }
 }
 
@@ -670,7 +705,7 @@ async function actSell(who,good,n){
             secret=bt.hidden; if(!secret) sum+=bt.val;
             burst(bt.x,bt.y,20,C.rose); await wait(170); }
   }
-  floatText('+'+sum+(secret?' + ?':''), dest.x, dest.y-40, C.goldLt, 34);
+  floatText('+'+sum+(secret?' + ?':''), dest.x, dest.y-u(34), C.goldLt, 26);
   if(n>=4) burst(dest.x,dest.y-20,26,C.gold);
   logLine((who==='p'?'Vous vendez ':'L\'ordinateur vend ')+n+' '+LBLP[good]+
           ' → +'+sum+(secret?' + prime secrète':(bt?' (prime comprise)':''))+'.');
@@ -1054,13 +1089,13 @@ function button(id,label,x,y,w,h,o={}){
   if(o.ghost){
     c.fillStyle = hot?'rgba(231,215,180,.14)':'rgba(231,215,180,.05)';
     c.fill(); c.lineWidth=1.4; c.strokeStyle='rgba(231,215,180,.34)'; c.stroke();
-    txt(label,x+w/2,y+h/2+1,{size:Math.min(20,h*.44),align:'center',color:hot?C.txt:C.dim,weight:600});
+    txt(label,x+w/2,y+h/2+1,{size:Math.min(17/TS,h*.42/TS),align:'center',color:hot?C.txt:C.dim,weight:600});
   } else {
     const g=c.createLinearGradient(x,y,x,y+h);
     g.addColorStop(0,hot?'#f7e2ab':'#e0b458'); g.addColorStop(1,hot?'#d9a949':'#b98d33');
     c.fillStyle=g; c.fill();
     c.lineWidth=1.4; c.strokeStyle='rgba(255,255,255,.35)'; c.stroke();
-    txt(label,x+w/2,y+h/2+1,{size:Math.min(21,h*.45),align:'center',color:'#20140a',weight:700});
+    txt(label,x+w/2,y+h/2+1,{size:Math.min(18/TS,h*.44/TS),align:'center',color:'#20140a',weight:700});
   }
   c.restore(); BTN.push({id,x,y,w,h});
 }
@@ -1069,7 +1104,7 @@ function circleButton(id,label,cx,cy,r){
   c.save(); c.beginPath(); c.arc(cx,cy,r,0,7);
   c.fillStyle=hot?'rgba(231,215,180,.16)':'rgba(231,215,180,.06)'; c.fill();
   c.lineWidth=1.4; c.strokeStyle='rgba(231,215,180,.35)'; c.stroke(); c.restore();
-  txt(label,cx,cy+1,{size:r*1.1,align:'center',color:hot?C.txt:C.dim,weight:700});
+  txt(label,cx,cy+1,{size:r*1.15/TS,align:'center',color:hot?C.txt:C.dim,weight:700});
   BTN.push({id,x:cx-r,y:cy-r,w:r*2,h:r*2});
 }
 
@@ -1079,34 +1114,31 @@ function drawTable(){
   ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
   if(jaliPat){ ctx.save(); ctx.fillStyle=jaliPat; ctx.fillRect(0,0,W,H); ctx.restore(); }
   ctx.save(); ctx.strokeStyle='rgba(224,180,88,.22)'; ctx.lineWidth=2;
-  rr(14,14,W-28,H-28,18); ctx.stroke();
-  ctx.strokeStyle='rgba(224,180,88,.10)'; ctx.lineWidth=1;
-  rr(22,22,W-44,H-44,14); ctx.stroke();
+  rr(u(14),u(14),W-u(28),H-u(28),u(18)); ctx.stroke();
+  ctx.strokeStyle='rgba(231,215,180,.10)'; ctx.lineWidth=1;
   if(L.mode==='wide'){
-    ctx.strokeStyle='rgba(231,215,180,.10)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(L.centerL,40); ctx.lineTo(L.centerL,H-40); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(L.panelX-26,40); ctx.lineTo(L.panelX-26,H-40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(L.centerL,u(40)); ctx.lineTo(L.centerL,H-u(40)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(L.panelX-u(26),u(40)); ctx.lineTo(L.panelX-u(26),H-u(40)); ctx.stroke();
   } else {
-    ctx.strokeStyle='rgba(231,215,180,.10)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(30,L.topY+50); ctx.lineTo(W-30,L.topY+50); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(30,L.botY-50); ctx.lineTo(W-30,L.botY-50); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(u(22),L.barH); ctx.lineTo(W-u(22),L.barH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(u(22),H-L.barH); ctx.lineTo(W-u(22),H-L.barH); ctx.stroke();
   }
   ctx.restore();
 }
 
 function drawArcade(){
-  const p = L.mode==='tall' ? 4 : 13, ph = L.mode==='tall' ? 34 : 46;
+  const p = L.mode==='tall' ? u(3) : u(13), ph = L.mode==='tall' ? u(22) : u(46);
   for(let i=0;i<5;i++){
     const s=L.slot(i);
-    jharokha(s.x-CW/2-p, s.y-CH/2-16, CW+2*p, CH+ph, S.market[i]?1:.45);
+    jharokha(s.x-CW/2-p, s.y-CH/2-u(16), CW+2*p, CH+ph, S.market[i]?1:.45);
   }
   if(L.mode==='wide'){
-    chhatri(L.deck.x, L.deck.y-CH/2-24, 62);
+    chhatri(L.deck.x, L.deck.y-CH/2-u(24), u(62));
     ctx.save(); ctx.strokeStyle='rgba(231,215,180,.16)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(L.slotX[0]-CW/2-p-8,L.arcY);
-    ctx.lineTo(L.slotX[4]+CW/2+p+8,L.arcY); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.moveTo(L.slotX[0]-CW/2-p-u(8),L.arcY);
+    ctx.lineTo(L.slotX[4]+CW/2+p+u(8),L.arcY); ctx.stroke(); ctx.restore();
   }
-  txt('LE MARCHÉ',L.cx,L.labY,{size:14,align:'center',color:C.dim,weight:600,ls:5});
+  txt('LE MARCHÉ',L.cx,L.labY,{size:12,align:'center',color:C.dim,weight:600,ls:4});
 }
 
 function drawComptoir(){
@@ -1120,51 +1152,51 @@ function drawComptoir(){
       else { ctx.save(); ctx.setLineDash([3,4]); ctx.beginPath();
              ctx.arc(c.gx[gi],c.gy,c.d/2,0,7); ctx.strokeStyle='rgba(216,116,143,.4)';
              ctx.lineWidth=1.4; ctx.stroke(); ctx.restore(); }
-      txt(arr.length?'×'+arr.length:'épuisé', c.gx[gi], c.gy+42,
-          {size:14,align:'center',color:arr.length?C.dim:'rgba(216,116,143,.8)',weight:600});
+      txt(arr.length?'×'+arr.length:'0', c.gx[gi]+c.d*0.62, c.gy,
+          {size:12,color:arr.length?C.dim:'rgba(216,116,143,.85)',weight:700});
     });
+    txt('PRIMES',c.x+u(2),c.by,{size:10,color:C.dim,weight:700,ls:2});
     [3,4,5].forEach((k,i)=>{
       for(const t of S.bonus[k]) t.draw(false);
       if(!S.bonus[k].length){ ctx.save(); ctx.setLineDash([3,4]); ctx.beginPath();
-        ctx.arc(c.bx[i],c.by,22,0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
-      txt((k===5?'5+':String(k)),c.bx[i],c.by+38,{size:13,align:'center',color:C.dim,weight:600});
+        ctx.arc(c.bx[i],c.by,u(11),0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
     });
-    txt('PRIMES',c.bx[0]-52,c.by,{size:12,align:'right',color:C.dim,weight:700,ls:2});
-    drawTokenSprite(tokSrc(TOK_I.camel),c.camX,c.camY,46); valueBadge(c.camX,c.camY,5,46);
-    txt('troupeau',c.camX,c.camY+38,{size:13,align:'center',color:C.dim,weight:600});
+    drawTokenSprite(tokSrc(TOK_I.camel),c.camX,c.camY,u(24)); valueBadge(c.camX,c.camY,5,u(24));
+    txt('au plus gros troupeau',c.camX+u(16),c.camY,{size:11,color:C.dim,weight:600});
     const ep=emptyPiles();
-    txt(ep+'/3 piles',c.camX+96,c.camY,{size:16,color:ep>=2?C.rose:C.dim,weight:700});
+    txt(ep+'/3 piles',W-L.pad-u(2),c.camY,
+        {size:12,align:'right',color:ep>=2?C.rose:C.dim,weight:700});
   } else {
-    txt('COMPTOIR',c.x+8,66,{size:15,color:C.gold,weight:700,ls:5});
+    txt('COMPTOIR',c.x+u(8),u(66),{size:14,color:C.gold,weight:700,ls:5});
     ctx.save(); ctx.strokeStyle='rgba(224,180,88,.25)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(c.x+8,78); ctx.lineTo(c.x+250,78); ctx.stroke(); ctx.restore();
+    ctx.beginPath(); ctx.moveTo(c.x+u(8),u(78)); ctx.lineTo(c.x+c.w,u(78)); ctx.stroke(); ctx.restore();
     GOODS.forEach((g,gi)=>{
       const arr=S.tokenV[g], cy=c.gy[gi];
-      txt(LBL[g].toUpperCase(),c.x+248,cy-16,{size:12,align:'right',color:C.dim,weight:600,ls:1.5});
-      if(!arr.length) txt('épuisé',c.x+30,cy+2,{size:16,color:'rgba(216,116,143,.75)',weight:600});
+      txt(LBL[g].toUpperCase(),c.x+c.w-u(2),cy-u(16),{size:11,align:'right',color:C.dim,weight:600,ls:1.5});
+      if(!arr.length) txt('épuisé',c.x+u(30),cy+2,{size:14,color:'rgba(216,116,143,.75)',weight:600});
       for(const t of arr) t.draw(false);
       const last=arr[arr.length-1];
       if(last) valueBadge(last.x,last.y,last.val,last.d);
     });
-    txt('PRIMES DE VENTE',c.x+8,c.by-30,{size:12,color:C.dim,weight:600,ls:3});
+    txt('PRIMES DE VENTE',c.x+u(8),c.by-u(30),{size:11,color:C.dim,weight:600,ls:3});
     [3,4,5].forEach((k,i)=>{
       for(const t of S.bonus[k]) t.draw(false);
       if(!S.bonus[k].length){ ctx.save(); ctx.setLineDash([3,4]); ctx.beginPath();
-        ctx.arc(c.bx[i],c.by,22,0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
-      txt((k===5?'5+':String(k))+' cartes',c.bx[i],c.by+38,{size:13,align:'center',color:C.dim,weight:600});
+        ctx.arc(c.bx[i],c.by,u(22),0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
+      txt((k===5?'5+':String(k))+' cartes',c.bx[i],c.by+u(38),{size:12,align:'center',color:C.dim,weight:600});
     });
-    drawTokenSprite(tokSrc(TOK_I.camel),c.camX,c.camY,46); valueBadge(c.camX,c.camY,5,46);
-    txt('au plus grand',c.x+62,c.camY-9,{size:14,color:C.dim,weight:600});
-    txt('troupeau, en fin de manche',c.x+62,c.camY+11,{size:14,color:C.dim,weight:600});
+    drawTokenSprite(tokSrc(TOK_I.camel),c.camX,c.camY,u(46)); valueBadge(c.camX,c.camY,5,u(46));
+    txt('au plus grand troupeau,',c.camX+u(32),c.camY-u(9),{size:13,color:C.dim,weight:600});
+    txt('en fin de manche',c.camX+u(32),c.camY+u(11),{size:13,color:C.dim,weight:600});
     const ep=emptyPiles();
-    txt('PILES ÉPUISÉES',c.x+8,c.camY+66,{size:12,color:C.dim,weight:700,ls:3});
-    txt(ep+' / 3',c.x+248,c.camY+66,{size:17,align:'right',color:ep>=2?C.rose:C.txt,weight:700});
+    txt('PILES ÉPUISÉES',c.x+u(8),c.camY+u(66),{size:11,color:C.dim,weight:700,ls:3});
+    txt(ep+' / 3',c.x+c.w,c.camY+u(66),{size:15,align:'right',color:ep>=2?C.rose:C.txt,weight:700});
   }
 }
 
-function drawSeals(who,cx,cy,d=34){
+function drawSeals(who,cx,cy,d){
   for(let i=0;i<2;i++){
-    const got=S.seals[who]>i, x=cx+i*(d-2);
+    const got=S.seals[who]>i, x=cx+i*(d*0.94);
     ctx.save(); ctx.globalAlpha=got?1:.20;
     if(got) drawTokenSprite(tokSrc(TOK_I.seal),x,cy,d);
     else { ctx.beginPath(); ctx.arc(x,cy,d*0.44,0,7);
@@ -1172,93 +1204,96 @@ function drawSeals(who,cx,cy,d=34){
     ctx.restore();
   }
 }
-function dot(x,y){ ctx.save(); ctx.beginPath(); ctx.arc(x,y,4.5,0,7);
+function dot(x,y){ ctx.save(); ctx.beginPath(); ctx.arc(x,y,u(4.5),0,7);
                    ctx.fillStyle=C.gold; ctx.fill(); ctx.restore(); }
 
 function drawPanel(){                       /* paysage : panneau lateral */
-  const px=L.panelX, pr=px+232;
-  txt('MANCHE '+S.round,px,52,{size:15,color:C.gold,weight:700,ls:4});
+  const px=L.panelX, pr=px+L.panelW-u(8);
+  txt('MANCHE '+S.round,px,u(52),{size:14,color:C.gold,weight:700,ls:4});
   ctx.save(); ctx.strokeStyle='rgba(224,180,88,.25)'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(px,66); ctx.lineTo(pr,66); ctx.stroke(); ctx.restore();
+  ctx.beginPath(); ctx.moveTo(px,u(66)); ctx.lineTo(pr,u(66)); ctx.stroke(); ctx.restore();
 
-  txt('ORDINATEUR',px,100,{size:18,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:2});
-  if(S.turn==='a'&&S.screen==='jeu') dot(px-12,100);
-  drawSeals('a',px+8,130);
-  txt(purseTotal('a')+(hiddenTok('a')?' + ?':'')+' roupies',pr,100,
-      {size:20,align:'right',color:C.goldLt,weight:700});
-  txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux',pr,130,
-      {size:15,align:'right',color:C.dim,weight:500});
-  txt(AI_LEVELS[S.diff].name+(S.aiDepth?' · profondeur '+S.aiDepth:''),pr,152,
-      {size:13,align:'right',color:C.dim,alpha:.75,weight:500});
+  txt('ORDINATEUR',px,u(100),{size:17,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:2});
+  if(S.turn==='a'&&S.screen==='jeu') dot(px-u(12),u(100));
+  drawSeals('a',px+u(8),u(130),u(34));
+  txt(purseTotal('a')+(hiddenTok('a')?' + ?':'')+' roupies',pr,u(100),
+      {size:19,align:'right',color:C.goldLt,weight:700});
+  txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux',pr,u(130),
+      {size:14,align:'right',color:C.dim,weight:500});
+  txt(AI_LEVELS[S.diff].name+(S.aiDepth?' · prof. '+S.aiDepth:''),pr,u(152),
+      {size:12,align:'right',color:C.dim,alpha:.75,weight:500});
   for(const t of S.purse.a) t.draw(true);
 
-  txt('JOURNAL',px,336,{size:12,color:C.dim,weight:700,ls:4});
+  txt('JOURNAL',px,u(336),{size:11,color:C.dim,weight:700,ls:4});
   ctx.save(); ctx.strokeStyle='rgba(231,215,180,.12)'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(px,346); ctx.lineTo(pr,346); ctx.stroke(); ctx.restore();
-  S.log.forEach((l,i)=>txt(l,px,368+i*23,
-    {size:15,color:C.txt,alpha:0.35+0.65*((i+1)/S.log.length),weight:500}));
+  ctx.beginPath(); ctx.moveTo(px,u(346)); ctx.lineTo(pr,u(346)); ctx.stroke(); ctx.restore();
+  const lh=Math.max(u(23),16*TS);
+  S.log.forEach((l,i)=>txt(l,px,u(368)+i*lh,
+    {size:14,color:C.txt,alpha:0.35+0.65*((i+1)/S.log.length),weight:500}));
 
-  txt('VOUS',px,600,{size:18,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:2});
-  if(S.turn==='p'&&S.screen==='jeu') dot(px-12,600);
-  drawSeals('p',px+8,630);
-  txt(purseTotal('p')+' roupies',pr,600,{size:20,align:'right',color:C.goldLt,weight:700});
-  txt(S.hand.p.length+'/7 cartes · '+S.herd.p.length+' chameaux',pr,630,
-      {size:15,align:'right',color:C.dim,weight:500});
+  txt('VOUS',px,u(600),{size:17,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:2});
+  if(S.turn==='p'&&S.screen==='jeu') dot(px-u(12),u(600));
+  drawSeals('p',px+u(8),u(630),u(34));
+  txt(purseTotal('p')+' roupies',pr,u(600),{size:19,align:'right',color:C.goldLt,weight:700});
+  txt(S.hand.p.length+'/7 cartes · '+S.herd.p.length+' chameaux',pr,u(630),
+      {size:14,align:'right',color:C.dim,weight:500});
   for(const t of S.purse.p) t.draw(true);
-  button('rulesGame','Règles',px,846,96,36,{ghost:true});
+  button('rulesGame','Règles',px,u(846),u(96),u(36),{ghost:true});
 }
 
 function drawBars(){                        /* portrait : bandeaux haut et bas */
-  const pad=L.pad, x0=pad+14;
-  txt('ORDINATEUR',x0,L.topY,{size:16,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:2});
-  if(S.turn==='a'&&S.screen==='jeu') dot(pad+4,L.topY);
-  drawSeals('a',x0+120,L.topY,26);
-  txt(purseTotal('a')+(hiddenTok('a')?' + ?':'')+' roupies',x0+186,L.topY,
-      {size:17,color:C.goldLt,weight:700});
+  const x0=L.pad+u(4);
+  txt('ORDINATEUR',x0,L.topY,{size:14,color:S.turn==='a'?C.goldLt:C.txt,weight:700,ls:1.5});
+  if(S.turn==='a'&&S.screen==='jeu') dot(L.pad-u(3),L.topY);
+  drawSeals('a',x0+u(112),L.topY,u(20));
+  txt(purseTotal('a')+(hiddenTok('a')?'+?':'')+' r.',x0+u(152),L.topY,
+      {size:14,color:C.goldLt,weight:700});
   txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux · '+AI_LEVELS[S.diff].name+
-      (S.aiDepth?' (prof. '+S.aiDepth+')':''),
-      x0,L.topY+26,{size:13,color:C.dim,weight:500});
+      (S.aiDepth?' ('+S.aiDepth+')':''), x0,L.rowY,{size:11,color:C.dim,weight:500});
   for(const t of S.purse.a) t.draw(true);
 
-  txt('VOUS',x0,L.botY,{size:16,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:2});
-  if(S.turn==='p'&&S.screen==='jeu') dot(pad+4,L.botY);
-  drawSeals('p',x0+120,L.botY,26);
-  txt(purseTotal('p')+' roupies',x0+186,L.botY,{size:17,color:C.goldLt,weight:700});
+  txt('VOUS',x0,L.botY,{size:14,color:S.turn==='p'?C.goldLt:C.txt,weight:700,ls:1.5});
+  if(S.turn==='p'&&S.screen==='jeu') dot(L.pad-u(3),L.botY);
+  drawSeals('p',x0+u(112),L.botY,u(20));
+  txt(purseTotal('p')+' r.',x0+u(152),L.botY,{size:14,color:C.goldLt,weight:700});
   txt('MANCHE '+S.round+' · '+S.hand.p.length+'/7 cartes · '+S.herd.p.length+' chameaux',
-      x0,L.botY-26,{size:13,color:C.dim,weight:500});
+      x0,L.rowYb,{size:11,color:C.dim,weight:500});
   for(const t of S.purse.p) t.draw(true);
-  circleButton('rulesGame','?',W-32,20,16);
-  if(S.log.length) txt(S.log[S.log.length-1],L.cx,L.msgY+34,
-      {size:14,align:'center',color:C.dim,alpha:.7,weight:500});
+  circleButton('rulesGame','?',W-u(20),u(20),u(13));
 }
 
 function drawZones(){
   if(L.mode==='wide'){
-    txt('ORDINATEUR',L.centerL+28,L.topY,{size:14,color:C.dim,weight:600,ls:4});
-    txt('VOTRE MAIN',L.centerL+28,L.botY,{size:14,color:C.dim,weight:600,ls:4});
+    txt('ORDINATEUR',L.centerL+u(28),L.topY,{size:13,color:C.dim,weight:600,ls:4});
+    txt('VOTRE MAIN',L.centerL+u(28),L.botY,{size:13,color:C.dim,weight:600,ls:4});
   }
-  txt('ENCLOS',L.herdA.x,L.herdA.y-CH*L.herdScA*0.78/2-16,
-      {size:12,align:'center',color:C.dim,weight:600,ls:3});
-  txt('ENCLOS',L.herdP.x,L.herdP.y-CH*L.herdScP*0.78/2-16,
-      {size:12,align:'center',color:C.dim,weight:600,ls:3});
-  txt('PIOCHE '+S.deck.length,L.deck.x,L.deck.y+CH*L.deckSc/2+16,
-      {size:14,align:'center',color:C.dim,weight:600,ls:2});
-  txt('DÉFAUSSE',L.discard.x,L.discard.y+CH*L.discSc/2+16,
-      {size:12,align:'center',color:C.dim,weight:600,ls:2});
+  const lz=L.mode==='tall'?10:12;
+  txt('ENCLOS',L.herdA.x,L.herdA.y-CH*L.herdScA*0.39-u(12),
+      {size:lz,align:'center',color:C.dim,weight:600,ls:2});
+  txt('ENCLOS',L.herdP.x,L.herdP.y-CH*L.herdScP*0.39-u(12),
+      {size:lz,align:'center',color:C.dim,weight:600,ls:2});
+  txt('PIOCHE '+S.deck.length,L.deck.x,L.deck.y+CH*L.deckSc/2+u(13),
+      {size:lz,align:'center',color:C.dim,weight:600,ls:1.5});
+  txt('DÉFAUSSE',L.discard.x,L.discard.y+CH*L.discSc/2+u(13),
+      {size:lz,align:'center',color:C.dim,weight:600,ls:1.5});
 
   let m=S.msg||'';
   if(S.thinking) m+='.'.repeat(1+((Date.now()/320)|0)%3);
   if(m){
-    const w=Math.min(W-40,measure(m,22,600)+56);
-    ctx.save(); rr(L.cx-w/2,L.msgY-20,w,38,19);
+    const sz=L.mode==='tall'?16:21;
+    const w=Math.min(W-u(30),measure(m,sz,600)+u(50)), h=sz*TS*1.7;
+    ctx.save(); rr(L.cx-w/2,L.msgY-h/2,w,h,h/2);
     ctx.fillStyle='rgba(7,33,31,.55)'; ctx.fill();
     ctx.lineWidth=1; ctx.strokeStyle='rgba(224,180,88,.3)'; ctx.stroke(); ctx.restore();
-    txt(m,L.cx,L.msgY,{size:22,align:'center',color:C.txt,weight:600});
+    txt(m,L.cx,L.msgY,{size:sz,align:'center',color:C.txt,weight:600});
   }
+  if(L.mode==='tall' && S.log.length && !S.thinking)
+    txt(S.log[S.log.length-1],L.cx,L.msgY+u(26),
+        {size:11,align:'center',color:C.dim,alpha:.75,weight:500});
   if(S.sel.camels>0)
     txt(S.sel.camels+' chameau'+(S.sel.camels>1?'x':'')+' à donner',
-        L.herdP.x,L.herdP.y+CH*L.herdScP*0.78/2+20,
-        {size:15,align:'center',color:C.goldLt,weight:700});
+        L.herdP.x,L.herdP.y+CH*L.herdScP*0.39+u(14),
+        {size:L.mode==='tall'?11:14,align:'center',color:C.goldLt,weight:700});
 }
 
 function drawCards(){
@@ -1266,7 +1301,7 @@ function drawCards(){
   const push=(a,b)=>a.forEach((c,i)=>{ c._z=b+(c.ord!==undefined?c.ord:i); all.push(c); });
   push(S.deck,0); push(S.discard,90); push(S.market,300);
   push(S.hand.a,500); push(S.herd.a,700); push(S.hand.p,900); push(S.herd.p,1100);
-  for(const c of all) if(c.speed>50||c.lift>2) c._z+=5000;
+  for(const c of all) if(c.speed>50*U||c.lift>2*U) c._z+=5000;
   all.sort((x,y)=>x._z-y._z);
   for(const c of all) c.draw();
 }
@@ -1274,13 +1309,13 @@ function drawCards(){
 function drawActions(){
   if(S.screen!=='jeu') return;
   const acts = S.busy?[]:playerActions();
-  const bh = L.mode==='tall'?56:46;
+  const bh=L.actH, tall=L.mode==='tall';
   if(!acts.length){
     const h = handSize('p')>=7
       ? 'Main pleine : vendez, troquez, ou prenez les chameaux.'
-      : 'Touchez une carte du marché, ou vos cartes en main pour vendre.';
-    if(!S.busy) txt(h,L.cx,L.actY+bh/2,
-      {size:L.mode==='tall'?16:17,align:'center',color:C.dim,weight:500});
+      : (tall?'Touchez une carte du marché, ou vos cartes pour vendre.'
+             :'Cliquez une carte du marché, ou vos cartes en main pour vendre.');
+    if(!S.busy) txt(h,L.cx,L.actY+bh/2,{size:tall?12:16,align:'center',color:C.dim,weight:500});
     return;
   }
   if(acts.length===1 && acts[0].id==='clear'){
@@ -1289,68 +1324,80 @@ function drawActions(){
     const give=S.sel.hand.size+S.sel.camels;
     let h='Sélection incomplète.';
     if(selM.length>=2)
-      h='Troc : rendez '+selM.length+' carte'+(selM.length>1?'s':'')+
-        ' de votre main ou de l\'enclos — '+give+' sélectionnée'+(give>1?'s':'')+'.';
+      h='Rendez '+selM.length+' carte'+(selM.length>1?'s':'')+' (main ou enclos) — '+give+' choisie'+(give>1?'s':'')+'.';
     else if(selM.length===1 && handSize('p')>=7) h='Main pleine : impossible de prendre une carte de plus.';
     else if(selM.length===1) h='Ajoutez une 2e carte du marché pour troquer.';
     else if(selH.length){
       const g=selH[0].type;
-      if(!selH.every(c=>c.type===g)) h='Une vente ne porte que sur un seul type de marchandise.';
-      else if(!S.tokens[g].length) h='Plus aucun jeton '+LBLP[g]+' : cette vente ne rapporte rien.';
-      else h='Diamant, or et argent : 2 cartes minimum pour vendre.';
+      if(!selH.every(c=>c.type===g)) h='Une vente ne porte que sur un seul type.';
+      else if(!S.tokens[g].length) h='Plus aucun jeton '+LBLP[g]+' : vente sans gain.';
+      else h='Diamant, or et argent : 2 cartes minimum.';
     }
-    txt(h,L.cx,L.actY-18,{size:15,align:'center',color:C.dim,weight:500});
+    txt(h,L.cx,L.actY-u(13),{size:tall?11:14,align:'center',color:C.dim,weight:500});
   }
-  /* mise en page sur une ou deux lignes selon la largeur */
-  const avail=W-2*(L.pad||30), gap=12;
-  const ws=acts.map(a=>Math.max(160,measure(a.label,20,700)+52));
+  const avail=W-2*L.pad, gap=u(10);
+  const ws=acts.map(a=>Math.max(u(120),measure(a.label,tall?15:18,700)+u(44)));
   const rows=[[]]; let cur=0;
   acts.forEach((a,i)=>{
     const rw=rows[cur].reduce((s,j)=>s+ws[j]+gap,0);
     if(rows[cur].length && rw+ws[i]>avail){ rows.push([]); cur++; }
     rows[cur].push(i);
   });
-  const y0=L.actY-(rows.length-1)*(bh+8)/2;
+  const y0=L.actY-(rows.length-1)*(bh+u(7))/2;
   rows.forEach((row,r)=>{
     const tot=row.reduce((s,i)=>s+ws[i],0)+gap*(row.length-1);
     let x=L.cx-tot/2;
-    for(const i of row){ button(acts[i].id,acts[i].label,x,y0+r*(bh+8),ws[i],bh,{ghost:acts[i].ghost}); x+=ws[i]+gap; }
+    for(const i of row){ button(acts[i].id,acts[i].label,x,y0+r*(bh+u(7)),ws[i],bh,{ghost:acts[i].ghost}); x+=ws[i]+gap; }
   });
 }
 
 /* ---------- superpositions ---------- */
 function shade(a=.72){ ctx.fillStyle=`rgba(4,18,17,${a})`; ctx.fillRect(0,0,W,H); }
 function box(w,h){
-  w=Math.min(w,W-40); h=Math.min(h,H-50);
+  w=Math.min(w,W-u(30)); h=Math.min(h,H-u(40));
   const x=(W-w)/2, y=(H-h)/2;
-  ctx.save(); rr(x,y,w,h,26);
-  ctx.fillStyle='rgba(7,33,31,.95)'; ctx.fill();
+  ctx.save(); rr(x,y,w,h,u(24));
+  ctx.fillStyle='rgba(7,33,31,.96)'; ctx.fill();
   ctx.lineWidth=2; ctx.strokeStyle='rgba(224,180,88,.45)'; ctx.stroke(); ctx.restore();
   return {x,y,w,h,cx:x+w/2};
+}
+/* texte multi-lignes, renvoie le y suivant */
+function para(lines,x,y,maxW,size,lh,o={}){
+  for(const raw of lines){
+    let line='';
+    for(const wd of raw.split(' ')){
+      const cand=line?line+' '+wd:wd;
+      if(measure(cand,size,o.weight||500)>maxW){ txt(line,x,y,Object.assign({size},o)); line=wd; y+=lh; }
+      else line=cand;
+    }
+    txt(line,x,y,Object.assign({size},o)); y+=lh;
+  }
+  return y;
 }
 
 function drawMenu(){
   shade(.55);
-  const b=box(640,646), cx=b.cx;
-  chhatri(cx,b.y+92,74);
-  txt('JAIPUR',cx,b.y+168,{size:70,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
-  txt('DUEL DE MARCHANDS AU BAZAR',cx,b.y+210,{size:16,align:'center',color:C.gold,weight:600,ls:4});
-  ['Deux marchands, un marché de cinq cartes.',
-   'À chaque tour : prendre des cartes, ou vendre — jamais les deux.',
-   'Le plus riche en fin de manche emporte un Sceau d\'Excellence.']
-   .forEach((l,i)=>txt(l,cx,b.y+256+i*29,{size:18,align:'center',color:C.txt,alpha:.85}));
-  txt('ADVERSAIRE',cx,b.y+368,{size:13,align:'center',color:C.dim,weight:700,ls:4});
-  const bw=Math.min(186,(b.w-70)/3);
-  AI_LEVELS.forEach((lv,i)=>button('lvl'+i,lv.name,cx-1.5*bw-12+i*(bw+12),b.y+384,bw,42,
+  const tall=L.mode==='tall';
+  const b=box(u(tall?600:640),u(tall?700:646)), cx=b.cx;
+  chhatri(cx,b.y+u(88),u(66));
+  txt('JAIPUR',cx,b.y+u(158),{size:tall?52:62,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  txt('DUEL DE MARCHANDS AU BAZAR',cx,b.y+u(196),{size:tall?12:15,align:'center',color:C.gold,weight:600,ls:3});
+  para(['Deux marchands, un marché de cinq cartes.',
+        'À chaque tour : prendre des cartes, ou vendre — jamais les deux.',
+        'Le plus riche en fin de manche emporte un Sceau d\'Excellence.'],
+       cx,b.y+u(240),b.w-u(70),tall?14:17,u(26),{align:'center',color:C.txt,alpha:.85});
+  txt('ADVERSAIRE',cx,b.y+u(tall?400:368),{size:11,align:'center',color:C.dim,weight:700,ls:3});
+  const bw=Math.min(u(180),(b.w-u(60))/3), bg=u(10);
+  AI_LEVELS.forEach((lv,i)=>button('lvl'+i,lv.name,cx-1.5*bw-bg+i*(bw+bg),b.y+u(tall?416:384),bw,u(40),
     {ghost:true,active:S.diff===i}));
-  txt(['prend ses décisions vite et sans calcul',
-       'anticipe quelques coups à l\'avance',
-       'explore l\'arbre des coups et suit vos prises'][S.diff],
-      cx,b.y+450,{size:15,align:'center',color:C.dim,weight:500});
-  button('play','Commencer la partie',cx-160,b.y+482,320,54);
-  button('rules','Voir les règles',cx-160,b.y+550,320,44,{ghost:true});
-  txt('Sébastien Pauchon · Alexandre Roche · GameWorks',cx,b.y+616,
-      {size:14,align:'center',color:C.dim,weight:500});
+  para([['prend ses décisions vite et sans calcul',
+         'anticipe quelques coups à l\'avance',
+         'explore l\'arbre des coups et suit vos prises'][S.diff]],
+       cx,b.y+u(tall?486:450),b.w-u(70),tall?12:14,u(20),{align:'center',color:C.dim,weight:500});
+  button('play','Commencer la partie',cx-u(150),b.y+u(tall?522:482),u(300),u(50));
+  button('rules','Voir les règles',cx-u(150),b.y+u(tall?586:550),u(300),u(42),{ghost:true});
+  txt('Sébastien Pauchon · Alexandre Roche · GameWorks',cx,b.y+b.h-u(26),
+      {size:11,align:'center',color:C.dim,weight:500});
 }
 
 const RULES=[
@@ -1362,71 +1409,71 @@ const RULES=[
   ['Fin de manche','Trois piles de jetons épuisées, ou la pioche ne peut plus compléter le marché.']
 ];
 function drawRules(){
-  shade(.82);
-  const b=box(900,760), tw=b.w-96;
-  txt('LES RÈGLES',b.cx,b.y+58,{size:38,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
-  let y=b.y+124;
+  shade(.85);
+  const tall=L.mode==='tall';
+  const b=box(u(880),u(tall?860:760)), tw=b.w-u(80);
+  txt('LES RÈGLES',b.cx,b.y+u(52),{size:tall?32:36,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  let y=b.y+u(tall?104:118);
+  const lh=Math.max(u(24),(tall?13:16)*TS*1.35);
   for(const [h,t] of RULES){
-    txt(h.toUpperCase(),b.x+48,y,{size:15,color:C.gold,weight:700,ls:3});
-    let line='', yy=y+26;
-    for(const w of t.split(' ')){
-      const cand=line?line+' '+w:w;
-      if(measure(cand,17,500)>tw){ txt(line,b.x+48,yy,{size:17,color:C.txt,alpha:.85}); line=w; yy+=24; }
-      else line=cand;
-    }
-    txt(line,b.x+48,yy,{size:17,color:C.txt,alpha:.85});
-    y=yy+46;
+    txt(h.toUpperCase(),b.x+u(40),y,{size:12,color:C.gold,weight:700,ls:2});
+    y=para([t],b.x+u(40),y+lh*0.95,tw,tall?13:16,lh,{color:C.txt,alpha:.85})+lh*0.5;
   }
-  button('closeRules','Fermer',b.cx-120,b.y+b.h-66,240,48,{ghost:true});
+  button('closeRules','Fermer',b.cx-u(110),b.y+b.h-u(58),u(220),u(42),{ghost:true});
 }
 
 function drawRoundEnd(){
-  shade(.78);
+  shade(.80);
   const e=S.endInfo; if(!e) return;
-  const b=box(700,672), cx=b.cx;
-  txt('FIN DE LA MANCHE '+S.round,cx,b.y+62,{size:32,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
-  txt(e.why,cx,b.y+100,{size:16,align:'center',color:C.dim,weight:500});
-  const c1=b.x+b.w-360, c2=b.x+b.w-48;
-  txt('VOUS',c1,b.y+150,{size:15,align:'right',color:C.gold,weight:700,ls:2});
-  txt('ORDINATEUR',c2,b.y+150,{size:15,align:'right',color:C.gold,weight:700,ls:2});
+  const tall=L.mode==='tall';
+  const b=box(u(660),u(tall?720:672)), cx=b.cx;
+  txt('FIN DE LA MANCHE '+S.round,cx,b.y+u(52),{size:tall?26:30,align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  para([e.why],cx,b.y+u(88),b.w-u(70),tall?12:15,u(19),{align:'center',color:C.dim,weight:500});
+  const c1=b.x+b.w-u(200), c2=b.x+b.w-u(40);
+  const y0=b.y+u(tall?150:150), rh=Math.max(u(34),15*TS*1.7);
+  txt('VOUS',c1,y0,{size:12,align:'right',color:C.gold,weight:700,ls:1.5});
+  txt('ORDI',c2,y0,{size:12,align:'right',color:C.gold,weight:700,ls:1.5});
   [['Jetons marchandises',e.mar.p,e.mar.a],
    ['Jetons bonus',e.bon.p,e.bon.a],
    ['Chameaux',e.camels.p,e.camels.a],
    ['Jeton chameau (5)',S.camelTokenTo==='p'?'+5':'—',S.camelTokenTo==='a'?'+5':'—']
   ].forEach((r,i)=>{
-    const y=b.y+186+i*38;
-    txt(r[0],b.x+48,y,{size:18,color:C.txt,alpha:.8});
-    txt(String(r[1]),c1,y,{size:18,align:'right',color:C.txt,weight:600});
-    txt(String(r[2]),c2,y,{size:18,align:'right',color:C.txt,weight:600});
+    const y=y0+rh*(i+1);
+    txt(r[0],b.x+u(40),y,{size:tall?13:16,color:C.txt,alpha:.8});
+    txt(String(r[1]),c1,y,{size:tall?13:16,align:'right',color:C.txt,weight:600});
+    txt(String(r[2]),c2,y,{size:tall?13:16,align:'right',color:C.txt,weight:600});
   });
+  const yt=y0+rh*5.2;
   ctx.save(); ctx.strokeStyle='rgba(224,180,88,.3)'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(b.x+48,b.y+354); ctx.lineTo(c2,b.y+354); ctx.stroke(); ctx.restore();
-  txt('TOTAL',b.x+48,b.y+386,{size:21,color:C.goldLt,weight:700,ls:2});
-  txt(e.tot.p+' r.',c1,b.y+386,{size:23,align:'right',color:e.win==='p'?C.goldLt:C.txt,weight:700});
-  txt(e.tot.a+' r.',c2,b.y+386,{size:23,align:'right',color:e.win==='a'?C.goldLt:C.txt,weight:700});
-  txt(e.win==='p'?'Vous emportez le Sceau d\'Excellence':'L\'ordinateur emporte le Sceau d\'Excellence',
-      cx,b.y+446,{size:21,align:'center',color:C.txt,weight:600});
-  drawTokenSprite(tokSrc(TOK_I.seal),cx,b.y+504,62);
-  txt('Sceaux — vous '+S.seals.p+' · ordinateur '+S.seals.a,cx,b.y+560,
-      {size:17,align:'center',color:C.dim,weight:600});
-  button('next',S.over?'Voir le résultat':'Manche suivante',cx-150,b.y+592,300,52);
+  ctx.beginPath(); ctx.moveTo(b.x+u(40),yt-u(18)); ctx.lineTo(c2,yt-u(18)); ctx.stroke(); ctx.restore();
+  txt('TOTAL',b.x+u(40),yt,{size:tall?15:19,color:C.goldLt,weight:700,ls:1.5});
+  txt(e.tot.p+' r.',c1,yt,{size:tall?17:21,align:'right',color:e.win==='p'?C.goldLt:C.txt,weight:700});
+  txt(e.tot.a+' r.',c2,yt,{size:tall?17:21,align:'right',color:e.win==='a'?C.goldLt:C.txt,weight:700});
+  para([e.win==='p'?'Vous emportez le Sceau d\'Excellence'
+                   :'L\'ordinateur emporte le Sceau d\'Excellence'],
+       cx,yt+u(48),b.w-u(70),tall?15:19,u(24),{align:'center',color:C.txt,weight:600});
+  drawTokenSprite(tokSrc(TOK_I.seal),cx,yt+u(100),u(56));
+  txt('Sceaux — vous '+S.seals.p+' · ordinateur '+S.seals.a,cx,yt+u(148),
+      {size:13,align:'center',color:C.dim,weight:600});
+  button('next',S.over?'Voir le résultat':'Manche suivante',cx-u(140),b.y+b.h-u(60),u(280),u(46));
 }
 
 function drawGameEnd(){
-  shade(.86);
-  const win=S.over==='p';
-  const b=box(600,530), cx=b.cx;
-  drawTokenSprite(tokSrc(TOK_I.seal),cx-40,b.y+110,68);
-  drawTokenSprite(tokSrc(TOK_I.seal),cx+40,b.y+110,68);
-  txt(win?'MARCHAND DU MAHARAJA':'LE BAZAR VOUS ÉCHAPPE',cx,b.y+212,
-      {size:Math.min(36,b.w/16),align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
-  txt(win?'Deux sceaux, et une mère très fière de vous.'
-        :'L\'ordinateur rafle les deux sceaux. On remet ça ?',
-      cx,b.y+262,{size:19,align:'center',color:C.txt,alpha:.85});
-  txt('Sceaux — vous '+S.seals.p+' · ordinateur '+S.seals.a,cx,b.y+310,
-      {size:17,align:'center',color:C.dim,weight:600});
-  button('again','Nouvelle partie',cx-150,b.y+376,300,54);
-  button('menu','Retour au menu',cx-150,b.y+444,300,46,{ghost:true});
+  shade(.88);
+  const win=S.over==='p', tall=L.mode==='tall';
+  const b=box(u(600),u(540)), cx=b.cx;
+  drawTokenSprite(tokSrc(TOK_I.seal),cx-u(38),b.y+u(104),u(64));
+  drawTokenSprite(tokSrc(TOK_I.seal),cx+u(38),b.y+u(104),u(64));
+  para([win?'MARCHAND DU MAHARAJA':'LE BAZAR VOUS ÉCHAPPE'],
+       cx,b.y+u(196),b.w-u(50),tall?28:34,u(38),
+       {align:'center',color:C.goldLt,weight:400,font:'Yatra One'});
+  para([win?'Deux sceaux, et une mère très fière de vous.'
+           :'L\'ordinateur rafle les deux sceaux. On remet ça ?'],
+       cx,b.y+u(258),b.w-u(60),tall?14:17,u(24),{align:'center',color:C.txt,alpha:.85});
+  txt('Sceaux — vous '+S.seals.p+' · ordinateur '+S.seals.a,cx,b.y+u(320),
+      {size:13,align:'center',color:C.dim,weight:600});
+  button('again','Nouvelle partie',cx-u(145),b.y+u(378),u(290),u(48));
+  button('menu','Retour au menu',cx-u(145),b.y+u(442),u(290),u(42),{ghost:true});
 }
 
 /* ---------- 16. ACTIONS DISPONIBLES POUR LE JOUEUR ---------- */
@@ -1504,8 +1551,9 @@ function cardAt(x,y){
 function herdHit(x,y){
   const n=S.herd.p.length; if(!n) return false;
   const sc=L.herdScP*0.78, w=CW*sc/2, h=CH*sc/2;
-  return x>=L.herdP.x-w && x<=L.herdP.x+(n-1)*L.herdDX+w &&
-         y>=L.herdP.y-(n-1)*L.herdDY-h && y<=L.herdP.y+h;
+  const dx=L.hdxP||0, dy=L.hdyP||0;
+  return x>=L.herdP.x-w && x<=L.herdP.x+(n-1)*dx+w &&
+         y>=L.herdP.y-(n-1)*dy-h && y<=L.herdP.y+h;
 }
 function maxGiveCamels(){ return Math.max(0,Math.min(S.herd.p.length, 7-handSize('p'), 5)); }
 
