@@ -408,12 +408,12 @@ function computeLayout(vw,vh){
 
     /* si l'ecran est trop court (portrait presque carre), on retrecit les cartes
        juste ce qu'il faut pour que la pile verticale tienne */
-    const HB=u(58), hComp=u(70), hMsg=u(32), hAct=u(42), minGap=u(9);
+    const HB=u(58), hComp=u(80), hMsg=u(32), hAct=u(42), minGap=u(9);
     const A = 2*HB+hComp+u(13)+hMsg+hAct;
-    const k = Math.min(1, (H-8*minGap-A)/(CH*2.70));
+    const k = Math.min(1, (H-8*minGap-A)/(CH*2.88));
     if(k<1 && k>0.35){ CW*=k; CH*=k; }
     const cgap=(W-5*CW)/6;
-    const hAI=CH*0.44, hDeck=CH*0.36+u(13), hMk=CH, hHand=CH*0.90;
+    const hAI=CH*0.62, hDeck=CH*0.36+u(13), hMk=CH, hHand=CH*0.90;
     const fixed = A+hAI+hDeck+hMk+hHand;
     const gap = clamp((H-fixed)/8, minGap, u(46));
     const extra = Math.max(0, H-fixed-8*gap);
@@ -423,14 +423,14 @@ function computeLayout(vw,vh){
     L.purseP={x:W-u(76), y:H-u(22), d:u(19), per:8};
 
     let y = HB+gap;
-    L.handA={x:W*0.42, y:y+hAI/2}; L.handScA=0.44;
-    L.herdA={x:W-u(56), y:y+hAI/2}; L.herdScA=0.40;
+    L.handA={x:W*0.42, y:y+hAI/2}; L.handScA=0.62;
+    L.herdA={x:W-u(56), y:y+hAI/2}; L.herdScA=0.50;
     y += hAI+gap;
-    L.comp={x:pad, y:y, d:u(27), tall:true, w:W-2*pad};
-    L.comp.gy=y+u(19); L.comp.by=y+u(51);
-    L.comp.gx=[0,1,2,3,4,5].map(i=>pad+u(16)+i*((W-2*pad)/6));
-    L.comp.bx=[u(84),u(112),u(140)];
-    L.comp.camX=u(190); L.comp.camY=y+u(51);
+    L.comp={x:pad, y:y, d:u(36), dB:u(32), tall:true, w:W-2*pad};
+    L.comp.gy=y+u(22); L.comp.by=y+u(58);
+    L.comp.gx=[0,1,2,3,4,5].map(i=>pad+u(18)+i*((W-2*pad)/6));
+    L.comp.bx=[u(80),u(116),u(152)];
+    L.comp.camX=u(200); L.comp.camY=y+u(58);
     y += hComp+gap+extra/2;
     L.deck   ={x:W*0.22, y:y+CH*0.18}; L.deckSc=0.36;
     L.discard={x:W*0.78, y:y+CH*0.18}; L.discSc=0.32;
@@ -514,7 +514,7 @@ function layoutComptoir(){
                            t.td=(i===n-1)?c.d:c.d-u(4); });
     });
     [3,4,5].forEach((k,i)=>S.bonus[k].forEach((t,j)=>{
-      t.tx=c.bx[i]; t.ty=c.by-j*0.5*U; t.td=u(24); }));
+      t.tx=c.bx[i]; t.ty=c.by-j*0.5*U; t.td=c.dB; }));
   } else {
     GOODS.forEach((g,gi)=>{
       const arr=S.tokenV[g], n=arr.length;
@@ -1152,20 +1152,21 @@ function drawComptoir(){
       else { ctx.save(); ctx.setLineDash([3,4]); ctx.beginPath();
              ctx.arc(c.gx[gi],c.gy,c.d/2,0,7); ctx.strokeStyle='rgba(216,116,143,.4)';
              ctx.lineWidth=1.4; ctx.stroke(); ctx.restore(); }
-      txt(arr.length?'×'+arr.length:'0', c.gx[gi]+c.d*0.62, c.gy,
-          {size:12,color:arr.length?C.dim:'rgba(216,116,143,.85)',weight:700});
+      txt(arr.length?'×'+arr.length:'0', c.gx[gi]+c.d*0.60, c.gy,
+          {size:14,color:arr.length?C.txt:'rgba(216,116,143,.9)',weight:700});
     });
-    txt('PRIMES',c.x+u(2),c.by,{size:10,color:C.dim,weight:700,ls:2});
+    txt('PRIMES',c.x+u(2),c.by,{size:11,color:C.dim,weight:700,ls:1.5});
     [3,4,5].forEach((k,i)=>{
       for(const t of S.bonus[k]) t.draw(false);
       if(!S.bonus[k].length){ ctx.save(); ctx.setLineDash([3,4]); ctx.beginPath();
-        ctx.arc(c.bx[i],c.by,u(11),0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
+        ctx.arc(c.bx[i],c.by,c.dB/2,0,7); ctx.strokeStyle='rgba(231,215,180,.2)'; ctx.stroke(); ctx.restore(); }
     });
-    drawTokenSprite(tokSrc(TOK_I.camel),c.camX,c.camY,u(24)); valueBadge(c.camX,c.camY,5,u(24));
-    txt('au plus gros troupeau',c.camX+u(16),c.camY,{size:11,color:C.dim,weight:600});
+    drawTokenSprite(tokSrc(TOK_I.camel),c.camX,c.camY,c.dB); valueBadge(c.camX,c.camY,5,c.dB);
+    txt('au plus gros',c.camX+c.dB*0.62,c.camY-u(7),{size:12,color:C.dim,weight:600});
+    txt('troupeau',c.camX+c.dB*0.62,c.camY+u(7),{size:12,color:C.dim,weight:600});
     const ep=emptyPiles();
     txt(ep+'/3 piles',W-L.pad-u(2),c.camY,
-        {size:12,align:'right',color:ep>=2?C.rose:C.dim,weight:700});
+        {size:14,align:'right',color:ep>=2?C.rose:C.dim,weight:700});
   } else {
     txt('COMPTOIR',c.x+u(8),u(66),{size:14,color:C.gold,weight:700,ls:5});
     ctx.save(); ctx.strokeStyle='rgba(224,180,88,.25)'; ctx.lineWidth=1;
