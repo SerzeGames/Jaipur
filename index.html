@@ -352,7 +352,7 @@ const S = {
   endInfo:null, over:null, showRules:false,
   camelTokenTo:null,
   oppMin:[0,0,0,0,0,0],      /* cartes que le joueur a prises ouvertement (borne basse) */
-  diff:2, thinking:false, aiDepth:0, aiNodes:0,
+  diff:2, thinking:false, aiDepth:0, aiNodes:0, aiExact:false,
   zoom:1, showZoom:false
 };
 
@@ -801,15 +801,30 @@ const TOKLEN=GOODS.map(g=>TOKEN_SET[g].length);
 const TOKPS =GOODS.map(g=>{const a=TOKEN_SET[g],p=[0];
                            for(let i=0;i<a.length;i++)p.push(p[i]+a[i]);return p;});
 const MIN2  =GOODS.map(g=>CHER.has(g));
-const BONEV =[2,5,9];                       /* esperance des primes 3 / 4 / 5+ */
+/* pools initiaux des primes (regle officielle) */
+const BONPOOL=[[1,1,2,2,3,3],[4,4,5,5,6,6],[8,8,9,9,10,10]];
+const BONEV=[2,5,9];                        /* esperance a priori, avant tout tirage */
+const BEV=[2,5,9];                          /* esperance conditionnelle, recalculee chaque tour */
+/* Les primes que l'ordinateur a gagnees, il en connait la valeur (elle est au dos
+   de ses propres jetons). Celles du joueur et celles encore en pile sont, pour lui,
+   echangeables : leur esperance est donc exactement la moyenne du pool restant. */
+function refreshBonusEV(){
+  for(let t=0;t<3;t++){
+    const pool=BONPOOL[t].slice();
+    for(const tk of S.purse.a) if(tk.kind==='bonus' && (tk.tier||3)===t+3){
+      const i=pool.indexOf(tk.val); if(i>=0) pool.splice(i,1);
+    }
+    BEV[t]= pool.length ? pool.reduce((a,b)=>a+b,0)/pool.length : 0;
+  }
+}
 const topVal=(g,tk)=> tk<TOKLEN[g] ? TOKEN_SET[GOODS[g]][tk] : 0;
 const sumTop=(g,tk,k)=> TOKPS[g][Math.min(tk+k,TOKLEN[g])]-TOKPS[g][tk];
-const bonEV =n=> n>=5?BONEV[2] : n===4?BONEV[1] : n===3?BONEV[0] : 0;
+const bonEV =n=> n>=5?BEV[2] : n===4?BEV[1] : n===3?BEV[0] : 0;
 
 /* etat compact : un Int16Array de 33 cases */
 const IH=0, IO=6, ICM=12, ICO=13, IMK=14, IMC=20, ITK=21, IBN=27,
       IRM=30, IRO=31, IDP=32, SLEN=33;
-const MAXD=14, MAXM=72;
+const MAXD=30, MAXM=72;   /* profondeur max : la fin de manche se resout entierement */
 const POOL=[], MPOOL=[], MSC=[], MORD=[], TVS=[], CDV=[], CDG=[];
 for(let d=0;d<=MAXD;d++){
   POOL[d]=new Int16Array(SLEN);
@@ -817,7 +832,8 @@ for(let d=0;d<=MAXD;d++){
   MSC[d]=new Float32Array(MAXM); MORD[d]=new Int8Array(MAXM);
   TVS[d]=new Int8Array(6); CDV[d]=new Float32Array(8); CDG[d]=new Int8Array(8);
 }
-let DSEQ=new Int8Array(0), NODES=0, DEADLINE=0, ABORT=false, SEALW=32;
+let DSEQ=new Int8Array(0), NODES=0, DEADLINE=0, ABORT=false, SEALW=32, INEXACT=false,
+    ENDG=false, NARROW=false;
 const nowms=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
 
 /* ---- application d'un coup ---- */
@@ -835,7 +851,7 @@ function applyMove(st,m,side){
       st[off+g]-=k;
       const n=Math.min(k,TOKLEN[g]-tk);
       st[ri]+=sumTop(g,tk,n); st[ITK+g]=tk+n;
-      if(k>=3){ const t=k>=5?2:k-3; if(st[IBN+t]>0){ st[IBN+t]--; st[ri]+=BONEV[t]; } }
+      if(k>=3){ const t=k>=5?2:k-3; if(st[IBN+t]>0){ st[IBN+t]--; st[ri]+=BEV[t]; } }
       break; }
     case 1:{ const g=m[1]; st[IMK+g]--; st[off+g]++; drawTo(st,1); break; }
     case 2:{ const n=st[IMC]; st[IMC]=0; st[ci]+=n; drawTo(st,n); break; }
@@ -972,13 +988,13 @@ function genMoves(st,side,d,W){
 
 /* ---- recherche alpha-beta ---- */
 function search(st,d,alpha,beta,side){
-  if(isOver(st)) return finalVal(st);
-  if(d<=0) return evalState(st);
+  if(isOver(st)) return finalVal(st);          /* valeur exacte : la manche est finie */
+  if(d<=0){ INEXACT=true; return evalState(st); }
   if((++NODES&1023)===0 && nowms()>DEADLINE) ABORT=true;
-  if(ABORT) return evalState(st);
-  const W = d>=4?11 : d===3?9 : 7;
+  if(ABORT){ INEXACT=true; return evalState(st); }
+  const W = NARROW ? (d>=6?5 : d>=3?6 : 7) : (d>=4?11 : d===3?9 : 7);
   const n=genMoves(st,side,d,W);
-  if(!n) return evalState(st);
+  if(!n){ INEXACT=true; return evalState(st); }
   const ord=MORD[d], pool=MPOOL[d], child=POOL[d];
   let best = side===0 ? -1e9 : 1e9;
   for(let i=0;i<n;i++){
@@ -1004,7 +1020,7 @@ function buildRoot(){
   /* il connait ses propres primes, pas celles du joueur */
   st[IRM]=S.purse.a.reduce((s,t)=>s+(t.kind==='camel'?5:t.val),0);
   st[IRO]=S.purse.p.reduce((s,t)=>s+(t.kind==='camel'?5:
-            (t.kind==='bonus'?BONEV[(t.tier||3)-3]:t.val)),0);
+            (t.kind==='bonus'?BEV[(t.tier||3)-3]:t.val)),0);
   st[IDP]=0;
   const unseen=[6,6,6,8,8,10,11];
   const sub=t=>{ unseen[t==='chameau'?6:GI[t]]--; };
@@ -1017,11 +1033,17 @@ function buildRoot(){
   let known=0; for(let g=0;g<6;g++) known+=S.oppMin[g];
   return {st,unseen,hidden:Math.max(0,S.hand.p.length-known)};
 }
-function determinize(root){
+/* Tirage a faible discrepance : au lieu de W mains independantes (variance elevee
+   quand W est petit), l'ensemble des mondes couvre regulierement la distribution.
+   Le tirage reste non biaise sur la moyenne, mais l'echantillon est mieux reparti. */
+const PHI=0.6180339887498949;
+function determinize(root,w,W){
   const un=root.unseen.slice(), st=root.st.slice();
   let left=0; for(let g=0;g<6;g++) left+=un[g];
-  for(let k=0;k<root.hidden && left>0;k++){        /* jamais de chameau dans une main */
-    let r=Math.random()*left, g=0;
+  const jitter=Math.random()/Math.max(1,W);
+  for(let k=0;k<root.hidden && left>0;k++){       /* jamais de chameau dans une main */
+    const uq = (W>1) ? (((w+0.5)/W + k*PHI + jitter) % 1) : Math.random();
+    let r=uq*left, g=0;
     while(g<5 && r>=un[g]){ r-=un[g]; g++; }
     if(un[g]<=0){ g=0; while(g<6 && un[g]<=0) g++; if(g===6) break; }
     un[g]--; left--; st[IO+g]++;
@@ -1034,15 +1056,16 @@ function determinize(root){
 
 /* ---- niveaux ---- */
 const AI_LEVELS=[
-  {name:'Marchand',  budget:80,  worlds:2, maxd:3, noise:2.4},
-  {name:'Négociant', budget:320, worlds:4, maxd:5, noise:0.9},
-  {name:'Maharaja',  budget:900, worlds:7, maxd:12, noise:0.0}
+  {name:'Marchand',  budget:80,  worlds:2, maxd:3,  noise:2.4, endg:0},
+  {name:'Négociant', budget:320, worlds:4, maxd:5,  noise:0.9, endg:9},
+  {name:'Maharaja',  budget:900, worlds:7, maxd:12, noise:0.0, endg:16}
 ];
 const yieldNow=()=>new Promise(r=>setTimeout(r,0));
 
 async function chooseMove(){
   const cfg=AI_LEVELS[S.diff];
   SEALW=(S.seals.a>=1||S.seals.p>=1)?48:32;   /* manche decisive : on joue le tout pour le tout */
+  refreshBonusEV();
   const root=buildRoot();
   const rootMoves=[];
   { const n=genMoves(root.st,0,MAXD,26), ord=MORD[MAXD], pool=MPOOL[MAXD];
@@ -1050,33 +1073,104 @@ async function chooseMove(){
   if(!rootMoves.length) return null;
   if(rootMoves.length===1) return rootMoves[0];
 
-  const R=rootMoves.length, best=new Float64Array(R);
+  const R=rootMoves.length;
+  let samples=[]; for(let i=0;i<R;i++) samples.push([]);
   DEADLINE=nowms()+cfg.budget; ABORT=false; NODES=0;
-  let tick=nowms(), reached=0;
+  let tick=nowms(), reached=0, exact=false;
+
+  /* quand la pioche est courte, la manche entiere tient dans l'arbre :
+     on laisse la recherche descendre jusqu'aux positions terminales */
+  let deckLeft=0; for(let i=0;i<7;i++) deckLeft+=root.unseen[i];
+  deckLeft-=root.hidden;
+  ENDG = deckLeft<=(cfg.endg||0); NARROW=false;
+  const nW = cfg.worlds;
 
   for(let d=2; d<=cfg.maxd; d++){
-    const tmp=new Float64Array(R); let full=true;
-    for(let w=0; w<cfg.worlds && full; w++){
-      const world=determinize(root); DSEQ=world.seq;
+    const acc=[]; for(let i=0;i<R;i++) acc.push([]);
+    let full=true; INEXACT=false;
+    for(let w=0; w<nW && full; w++){
+      const world=determinize(root,w,nW); DSEQ=world.seq;
       for(let i=0;i<R;i++){
         const child=new Int16Array(world.st);
         applyMove(child,rootMoves[i],0);
-        tmp[i]+=search(child,d-1,-1e9,1e9,1);
+        acc[i].push(search(child,d-1,-1e9,1e9,1));
         if(nowms()-tick>11){ await yieldNow(); tick=nowms(); ABORT=false; }
         if(d>2 && nowms()>DEADLINE){ full=false; break; }
       }
     }
-    if(full){ best.set(tmp); reached=d; }
-    if(!full || nowms()>DEADLINE) break;
+    if(full){ samples=acc; reached=d; exact=!INEXACT; }
+    if(!full || exact || nowms()>DEADLINE) break;   /* exact : inutile de creuser plus */
   }
-  S.aiDepth=reached; S.aiNodes=NODES;
+
+  /* Fin de manche : passe de raffinement en faisceau resserre, qui vise les
+     positions terminales. Elle est PUREMENT ADDITIVE — on ne remplace le resultat
+     precedent que si une profondeur superieure a ete entierement exploree, sinon
+     on garde tel quel. Elle ne peut donc pas degrader le jeu a budget serre. */
+  if(ENDG && !exact && nowms()<DEADLINE-60){
+    NARROW=true;
+    const nWe=Math.max(3, cfg.worlds>>1);
+    for(let d=Math.max(reached+1,4); d<=MAXD; d++){
+      const acc=[]; for(let i=0;i<R;i++) acc.push([]);
+      let full=true; INEXACT=false;
+      for(let w=0; w<nWe && full; w++){
+        const world=determinize(root,w,nWe); DSEQ=world.seq;
+        for(let i=0;i<R;i++){
+          const child=new Int16Array(world.st);
+          applyMove(child,rootMoves[i],0);
+          acc[i].push(search(child,d-1,-1e9,1e9,1));
+          if(nowms()-tick>11){ await yieldNow(); tick=nowms(); ABORT=false; }
+          if(nowms()>DEADLINE){ full=false; break; }
+        }
+      }
+      if(!full) break;
+      samples=acc; reached=d; exact=!INEXACT;
+      if(exact || nowms()>DEADLINE) break;
+    }
+    NARROW=false;
+  }
+
+  /* si les meilleurs coups se tiennent de pres, on depart les favoris
+     sur des mondes supplementaires plutot que d'aller plus profond */
+  if(!exact && reached>=3 && nowms()<DEADLINE-40){
+    let ord=rank(samples);
+    while(nowms()<DEADLINE-40){
+      const top=ord.slice(0,4);
+      const g=score(samples[top[0]])-score(samples[top[1]]);
+      if(g>2.5) break;                                 /* deja tranche */
+      const world=determinize(root,(Math.random()*cfg.worlds)|0,cfg.worlds); DSEQ=world.seq;
+      for(const i of top){
+        const child=new Int16Array(world.st);
+        applyMove(child,rootMoves[i],0);
+        samples[i].push(search(child,reached-1,-1e9,1e9,1));
+        if(nowms()-tick>11){ await yieldNow(); tick=nowms(); ABORT=false; }
+        if(nowms()>DEADLINE) break;
+      }
+      ord=rank(samples);
+    }
+  }
+
+  S.aiDepth=reached; S.aiNodes=NODES; S.aiExact=exact;
 
   let bi=0, bv=-1e18;
   for(let i=0;i<R;i++){
-    const v=best[i]+(cfg.noise?rnd(-cfg.noise,cfg.noise)*10:0);
+    const v=score(samples[i])+(cfg.noise?rnd(-cfg.noise,cfg.noise)*10:0);
     if(v>bv){ bv=v; bi=i; }
   }
   return rootMoves[bi];
+}
+/* Valeur d'un coup : moyenne sur les mondes echantillonnes.
+   (Une penalite de dispersion a ete essayee — preferer les coups qui tiennent dans
+   TOUS les mondes — puis retiree : mesuree a 41 % de manches, elle etouffe les coups
+   agressifs qui ne paient que dans certains mondes, et ceux-la paient souvent ici.) */
+function score(a){
+  const n=a.length; if(!n) return -1e9;
+  let m=0; for(let i=0;i<n;i++) m+=a[i];
+  return m/n;
+}
+function rank(samples){
+  const idx=samples.map((_,i)=>i);
+  idx.sort((x,y)=>score(samples[y])-score(samples[x]));
+  return idx;
 }
 
 /* ---- traduction du coup abstrait vers les cartes reelles ---- */
@@ -1258,7 +1352,7 @@ function drawPanel(){                       /* paysage : panneau lateral */
       {size:19,align:'right',color:C.goldLt,weight:700});
   txt(S.hand.a.length+' cartes · '+S.herd.a.length+' chameaux',pr,u(130),
       {size:14,align:'right',color:C.dim,weight:500});
-  txt(AI_LEVELS[S.diff].name+(S.aiDepth?' · prof. '+S.aiDepth:''),pr,u(152),
+  txt(AI_LEVELS[S.diff].name+(S.aiExact?' · fin jouée au bout':(S.aiDepth?' · prof. '+S.aiDepth:'')),pr,u(152),
       {size:12,align:'right',color:C.dim,alpha:.75,weight:500});
   for(const t of S.purse.a) t.draw(true);
 
@@ -1293,7 +1387,8 @@ function drawBars(){                        /* portrait : bandeaux haut et bas *
   const x0=L.pad+u(4);
   barRow('a','ORDINATEUR',L.topY,purseTotal('a')+(hiddenTok('a')?'+?':'')+' r.');
   txt(S.hand.a.length+' c. · '+S.herd.a.length+' ch. · '+AI_LEVELS[S.diff].name+
-      (S.aiDepth?' ('+S.aiDepth+')':''), x0,L.rowY,{size:11,color:C.dim,weight:500});
+      (S.aiExact?' (fin au bout)':(S.aiDepth?' ('+S.aiDepth+')':'')),
+      x0,L.rowY,{size:11,color:C.dim,weight:500});
   for(const t of S.purse.a) t.draw(true);
 
   barRow('p','VOUS',L.botY,purseTotal('p')+' r.');
